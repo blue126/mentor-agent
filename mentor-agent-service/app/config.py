@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     notion_token: str = ""
     notion_db_id: str = ""
     anki_connect_url: str = "http://anki:8765"
+    max_tool_iterations: int = 10
     port: int = 8100
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

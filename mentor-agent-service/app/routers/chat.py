@@ -10,7 +10,7 @@ from app.schemas.chat import (
     ResponseChoice,
     UsageInfo,
 )
-from app.services.llm_service import get_chat_completion, stream_chat_completion
+from app.services import agent_service
 from app.utils.sse_generator import sse_stream
 
 router = APIRouter()
@@ -21,13 +21,12 @@ async def chat_completions(request: ChatCompletionRequest) -> Response:
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     if request.stream:
-        result = await stream_chat_completion(
+        result = await agent_service.run_agent_loop_streaming(
             messages=messages,
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
         )
-        # Fail Soft: if result is a string, it's an error message
         if isinstance(result, str):
             return JSONResponse(status_code=502, content={"error": {"message": result, "type": "proxy_error"}})
 
@@ -41,7 +40,7 @@ async def chat_completions(request: ChatCompletionRequest) -> Response:
             },
         )
     else:
-        result = await get_chat_completion(
+        result = await agent_service.run_agent_loop(
             messages=messages,
             model=request.model,
             temperature=request.temperature,
@@ -58,6 +57,7 @@ async def chat_completions(request: ChatCompletionRequest) -> Response:
 
         selected_model = request.model or getattr(result, "model", "") or ""
 
+        usage_obj = getattr(result, "usage", None)
         response = ChatCompletionResponse(
             model=selected_model,
             choices=[
@@ -70,9 +70,9 @@ async def chat_completions(request: ChatCompletionRequest) -> Response:
                 )
             ],
             usage=UsageInfo(
-                prompt_tokens=getattr(result.usage, "prompt_tokens", 0),
-                completion_tokens=getattr(result.usage, "completion_tokens", 0),
-                total_tokens=getattr(result.usage, "total_tokens", 0),
+                prompt_tokens=getattr(usage_obj, "prompt_tokens", 0),
+                completion_tokens=getattr(usage_obj, "completion_tokens", 0),
+                total_tokens=getattr(usage_obj, "total_tokens", 0),
             ),
         )
         return JSONResponse(content=response.model_dump())

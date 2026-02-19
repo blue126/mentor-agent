@@ -5,9 +5,9 @@ from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, patch
 
 from httpx import ASGITransport, AsyncClient
-from tests.test_doubles import MockChunk
 
 from app.main import create_app
+from tests.test_doubles import MockChunk
 
 _VALID_TOKEN = "test-secret-key"
 _MESSAGES_PAYLOAD = {"messages": [{"role": "user", "content": "Hello"}], "model": "test-model"}
@@ -23,10 +23,45 @@ def _build_client():
     return AsyncClient(transport=transport, base_url="http://test"), app
 
 
+def _make_text_response(content="Hi there!", finish_reason="stop", model="test-model", usage=None):
+    """Build a mock non-streaming LLM response (no tool_calls)."""
+    if usage is None:
+        usage = type("Usage", (), {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8})()
+    return type(
+        "Response",
+        (),
+        {
+            "choices": [
+                type(
+                    "Choice",
+                    (),
+                    {
+                        "message": type("Msg", (), {"role": "assistant", "content": content, "tool_calls": None})(),
+                        "finish_reason": finish_reason,
+                    },
+                )()
+            ],
+            "usage": usage,
+            "model": model,
+        },
+    )()
+
+
+def _make_stream_aware_mock(non_stream_response, stream_response):
+    """Create an acompletion mock that returns different values for stream=True vs stream=False."""
+    async def _side_effect(**kwargs):
+        if kwargs.get("stream"):
+            return stream_response
+        return non_stream_response
+    return _side_effect
+
+
 async def test_streaming_chat_returns_sse_format():
     """Full streaming request should return valid SSE events ending with [DONE]."""
     ac, app = _build_client()
 
+    # Agent loop: 1st call (non-stream, tool check) → text response, 2nd call (stream) → SSE chunks
+    non_stream_resp = _make_text_response("Hello world")
     mock_stream = _mock_stream_response(MockChunk("Hello"), MockChunk(" world", "stop"))
 
     with (
@@ -34,7 +69,9 @@ async def test_streaming_chat_returns_sse_format():
         patch("app.services.llm_service.litellm") as mock_litellm,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
-        mock_litellm.acompletion = AsyncMock(return_value=mock_stream)
+        mock_litellm.acompletion = AsyncMock(
+            side_effect=_make_stream_aware_mock(non_stream_resp, mock_stream)
+        )
 
         async with ac:
             resp = await ac.post(
@@ -46,7 +83,7 @@ async def test_streaming_chat_returns_sse_format():
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
 
-    lines = [line for line in resp.text.split("\n\n") if line.strip()]
+    lines = [line for line in resp.text.split("\n\n") if line.strip() and line.startswith("data:")]
     # Last should be [DONE]
     assert lines[-1].strip() == "data: [DONE]"
     # All others should be valid JSON
@@ -60,24 +97,7 @@ async def test_non_streaming_chat_returns_json():
     """Non-streaming request should return a JSON completion response."""
     ac, app = _build_client()
 
-    mock_response = type(
-        "Response",
-        (),
-        {
-            "choices": [
-                type(
-                    "Choice",
-                    (),
-                    {
-                        "message": type("Msg", (), {"role": "assistant", "content": "Hi there!"})(),
-                        "finish_reason": "stop",
-                    },
-                )()
-            ],
-            "usage": type("Usage", (), {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8})(),
-            "model": "test-model",
-        },
-    )()
+    mock_response = _make_text_response("Hi there!")
 
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
@@ -173,24 +193,9 @@ async def test_non_streaming_null_usage_returns_200():
     """Non-streaming response with usage=None should return 200 with zeroed usage, not crash."""
     ac, _ = _build_client()
 
-    mock_response = type(
-        "Response",
-        (),
-        {
-            "choices": [
-                type(
-                    "Choice",
-                    (),
-                    {
-                        "message": type("Msg", (), {"role": "assistant", "content": "Hi"})(),
-                        "finish_reason": "stop",
-                    },
-                )()
-            ],
-            "usage": None,
-            "model": "test-model",
-        },
-    )()
+    mock_response = _make_text_response("Hi", usage=None)
+    # Override usage to None after creation
+    mock_response.usage = None
 
     with (
         patch("app.dependencies.settings") as mock_dep_settings,

@@ -84,3 +84,28 @@ async def get_chat_completion(
         temperature=temperature,
         max_tokens=max_tokens,
     )
+
+
+async def get_chat_completion_with_tools(
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    tool_choice: str = "auto",
+    model: str | None = None,
+    temperature: float | None = None,
+    max_tokens: int | None = None,
+) -> Any | str:
+    """Non-streaming completion with tool definitions. Returns response object or error string."""
+    try:
+        kwargs = _completion_kwargs(
+            messages=messages,
+            stream=False,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = tool_choice
+        return await litellm.acompletion(**kwargs)
+    except Exception as exc:
+        return f"Error: LLM service unavailable — {exc}"

@@ -47,7 +47,7 @@ async def test_valid_token_passes_through():
                 json={"messages": [{"role": "user", "content": "hi"}]},
                 headers={"Authorization": "Bearer test-secret-key"},
             )
-    # Auth passed → request reaches router → LLM mock fails → Fail Soft returns 502
+    # Auth passed → request reaches router → LLM mock fails → Fail Soft
     assert resp.status_code == 502
 
 

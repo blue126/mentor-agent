@@ -3,6 +3,7 @@ name: mentor-agent-service
 services:
   agent-service:
     container_name: mentor-agent-service
+    image: mentor-agent-service:latest
     build: .
     ports:
       - "8100:8100"
