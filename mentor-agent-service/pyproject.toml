@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mentor-agent-service"
+version = "0.1.0"
+description = "AI Mentor Agent Service - FastAPI backend for intelligent tutoring"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi[standard]>=0.129.0",
+    "uvicorn",
+    "httpx",
+    "litellm>=1.81.0",
+    "aiosqlite",
+    "pydantic-settings",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.18.0",
+    "networkx",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "vcrpy",
+    "ruff",
+    "mypy",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

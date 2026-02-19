@@ -1,0 +1,8 @@
+.env
+.git
+.gitignore
+.mypy_cache
+.ruff_cache
+.venv
+__pycache__
+data/*.db

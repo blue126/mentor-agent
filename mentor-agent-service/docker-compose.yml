@@ -1,0 +1,19 @@
+name: mentor-agent-service
+
+services:
+  agent-service:
+    container_name: mentor-agent-service
+    build: .
+    ports:
+      - "8100:8100"
+    volumes:
+      - agent-data:/app/data
+    env_file: .env
+    restart: unless-stopped
+
+  # open-webui: (Story 1.2)
+  # litellm-claude-code: (Story 1.2)
+  # anki: (Epic 5)
+
+volumes:
+  agent-data:
