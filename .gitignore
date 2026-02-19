@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Data
+data/
+*.db
+
+# OpenCode 凭证和配置
+.opencode/
+
+# Claude Code 本地设置
+.claude/settings.local.json
+
+# Codex
+.codex/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+tests/cassettes/
+
+# BMAD output (project-specific, tracked separately)
+# _bmad-output/
