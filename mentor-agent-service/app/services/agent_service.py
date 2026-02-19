@@ -5,13 +5,23 @@ Runs tool-loop decisions in non-streaming mode until finish_reason == "stop",
 then returns final response (non-stream) or streams final output (stream).
 """
 
+import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 from app.config import settings
 from app.services import llm_service
 from app.tools import registry
+from app.utils.sse_generator import (
+    make_done_event,
+    make_status_event,
+    queue_sse_stream,
+    run_heartbeat,
+)
+
+logger = logging.getLogger(__name__)
 
 
 async def _execute_tool(fn_name: str, fn_args_raw: str) -> str:
@@ -96,50 +106,102 @@ async def run_agent_loop_streaming(
     model: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
-) -> AsyncIterator[Any] | str:
-    """Streaming agent loop. Returns LLM stream iterator or error string."""
-    tools = registry.get_all_schemas()
-    max_iterations = settings.max_tool_iterations
+) -> AsyncIterator[str]:
+    """Streaming agent loop with SSE status updates.
 
-    for _ in range(max_iterations):
-        result = await llm_service.get_chat_completion_with_tools(
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+    Returns an AsyncIterator[str] that yields formatted SSE events:
+    status events, content deltas, and [DONE] terminator.
+    """
+    resolved_model = model or settings.litellm_model
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+    done = asyncio.Event()
 
-        if isinstance(result, str):
-            return result
-
-        if not getattr(result, "choices", None):
-            return "Error: LLM returned empty choices"
-
-        choice = result.choices[0]
-        finish_reason = choice.finish_reason
-
-        if finish_reason == "tool_calls" and getattr(choice.message, "tool_calls", None):
-            messages.append(choice.message.model_dump())
-            for tool_call in choice.message.tool_calls:
-                tool_result = await _execute_tool(
-                    fn_name=tool_call.function.name,
-                    fn_args_raw=tool_call.function.arguments,
+    async def _agent_loop() -> None:
+        try:
+            tools = registry.get_all_schemas()
+            iteration = 0
+            while iteration < settings.max_tool_iterations:
+                result = await llm_service.get_chat_completion_with_tools(
+                    messages=messages,
+                    tools=tools,
+                    tool_choice="auto",
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
                 )
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "name": tool_call.function.name,
-                    "content": tool_result,
-                })
-            continue
 
-        return await llm_service.stream_chat_completion(
-            messages=messages,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+                # Fail Soft: LLM error
+                if isinstance(result, str):
+                    await queue.put(make_status_event(f"⚠️ {result}", resolved_model))
+                    break
 
-    return f"Error: Tool use loop reached maximum iterations ({max_iterations}). The assistant may be stuck in a loop."
+                # Fail Soft: empty choices
+                if not getattr(result, "choices", None):
+                    await queue.put(make_status_event("⚠️ Error: LLM returned empty choices", resolved_model))
+                    break
+
+                choice = result.choices[0]
+                finish_reason = choice.finish_reason
+
+                if finish_reason == "tool_calls" and getattr(choice.message, "tool_calls", None):
+                    await queue.put(make_status_event("💭 Thinking...", resolved_model))
+                    messages.append(choice.message.model_dump())
+
+                    for tool_call in choice.message.tool_calls:
+                        fn_name = tool_call.function.name
+                        await queue.put(make_status_event(f"🔧 Running {fn_name}...", resolved_model))
+                        tool_result = await _execute_tool(fn_name, tool_call.function.arguments)
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "name": fn_name,
+                            "content": tool_result,
+                        })
+                    iteration += 1
+                    continue
+
+                # Final answer — stream to client
+                stream_result = await llm_service.stream_chat_completion(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if isinstance(stream_result, str):
+                    await queue.put(make_status_event(f"⚠️ {stream_result}", resolved_model))
+                    break
+
+                async for chunk in stream_result:
+                    chunk_dict = chunk.model_dump(exclude_none=True)
+                    await queue.put(f"data: {json.dumps(chunk_dict)}\n\n")
+                break
+            else:
+                # Max iterations reached
+                await queue.put(make_status_event(
+                    f"⚠️ Tool loop reached maximum {settings.max_tool_iterations} iterations",
+                    resolved_model,
+                ))
+
+            await queue.put(make_done_event())
+        except Exception as exc:
+            logger.exception("Agent loop error: %s", exc)
+            await queue.put(make_status_event(f"⚠️ Error: {exc}", resolved_model))
+            await queue.put(make_done_event())
+        finally:
+            done.set()
+            await queue.put(None)
+
+    agent_task = asyncio.create_task(_agent_loop())
+    heartbeat_task = asyncio.create_task(
+        run_heartbeat(queue, done, settings.sse_heartbeat_interval),
+    )
+
+    try:
+        async for event in queue_sse_stream(queue):
+            yield event
+    finally:
+        done.set()
+        for task in (agent_task, heartbeat_task):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(agent_task, heartbeat_task, return_exceptions=True)

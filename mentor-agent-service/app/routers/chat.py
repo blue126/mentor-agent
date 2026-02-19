@@ -11,7 +11,6 @@ from app.schemas.chat import (
     UsageInfo,
 )
 from app.services import agent_service
-from app.utils.sse_generator import sse_stream
 
 router = APIRouter()
 
@@ -21,17 +20,13 @@ async def chat_completions(request: ChatCompletionRequest) -> Response:
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     if request.stream:
-        result = await agent_service.run_agent_loop_streaming(
-            messages=messages,
-            model=request.model,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-        )
-        if isinstance(result, str):
-            return JSONResponse(status_code=502, content={"error": {"message": result, "type": "proxy_error"}})
-
         return StreamingResponse(
-            sse_stream(result),
+            agent_service.run_agent_loop_streaming(
+                messages=messages,
+                model=request.model,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

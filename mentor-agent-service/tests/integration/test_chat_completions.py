@@ -140,8 +140,8 @@ async def test_missing_token_returns_401():
     assert resp.status_code == 401
 
 
-async def test_llm_failure_returns_502():
-    """When LiteLLM is unreachable, streaming should return 502 error response."""
+async def test_llm_failure_streaming_returns_error_in_sse():
+    """When LiteLLM is unreachable, streaming should return SSE with error status + [DONE]."""
     ac, app = _build_client()
 
     with (
@@ -158,10 +158,12 @@ async def test_llm_failure_returns_502():
                 headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
             )
 
-    assert resp.status_code == 502
-    data = resp.json()
-    assert "error" in data
-    assert "proxy_error" in data["error"]["type"]
+    # Streaming path now returns 200 with error as SSE status event
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    # Should contain error text and [DONE]
+    assert "Connection refused" in resp.text or "unavailable" in resp.text.lower()
+    assert "data: [DONE]" in resp.text
 
 
 async def test_non_streaming_empty_choices_returns_502():

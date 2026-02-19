@@ -48,7 +48,9 @@ async def test_valid_token_passes_through():
                 headers={"Authorization": "Bearer test-secret-key"},
             )
     # Auth passed → request reaches router → LLM mock fails → Fail Soft
-    assert resp.status_code == 502
+    # Streaming path (default) returns 200 SSE with error; non-streaming returns 502
+    # Default stream=True, so error is inside SSE stream (200)
+    assert resp.status_code == 200
 
 
 async def test_health_endpoint_no_auth_required():

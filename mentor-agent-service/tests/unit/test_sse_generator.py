@@ -2,9 +2,8 @@
 
 import json
 
-from tests.test_doubles import MockChunk
-
 from app.utils.sse_generator import sse_stream
+from tests.test_doubles import MockChunk
 
 
 async def _mock_stream(*chunks: MockChunk):

@@ -223,12 +223,12 @@ class TestRunAgentLoop:
 
 
 class TestRunAgentLoopStreaming:
-    """Tests for run_agent_loop_streaming (streaming)."""
+    """Tests for run_agent_loop_streaming (SSE async generator)."""
 
     @patch("app.services.agent_service.settings")
     @patch("app.services.agent_service.llm_service")
     async def test_no_tool_use_streams_directly(self, mock_llm, mock_settings):
-        """No tool_calls → streams final response via stream_chat_completion."""
+        """No tool_calls → yields content deltas as SSE events."""
         from app.services.agent_service import run_agent_loop_streaming
 
         mock_settings.max_tool_iterations = 10
@@ -238,20 +238,25 @@ class TestRunAgentLoopStreaming:
         text_resp = _make_text_response("Hello")
         mock_llm.get_chat_completion_with_tools = AsyncMock(return_value=text_resp)
 
-        mock_stream = AsyncMock()
-        mock_llm.stream_chat_completion = AsyncMock(return_value=mock_stream)
+        async def _mock_stream():
+            from tests.test_doubles import MockChunk
+            yield MockChunk("Hello", finish_reason="stop")
+
+        mock_llm.stream_chat_completion = AsyncMock(return_value=_mock_stream())
 
         messages = [{"role": "user", "content": "Hi"}]
-        result = await run_agent_loop_streaming(messages)
+        events = []
+        async for event in run_agent_loop_streaming(messages):
+            events.append(event)
 
-        assert result is mock_stream
+        assert any("data: [DONE]" in e for e in events)
         mock_llm.stream_chat_completion.assert_called_once()
 
     @patch("app.services.agent_service.registry")
     @patch("app.services.agent_service.settings")
     @patch("app.services.agent_service.llm_service")
     async def test_tool_use_then_stream(self, mock_llm, mock_settings, mock_registry):
-        """Tool call → tool result → final text streamed."""
+        """Tool call → tool result → final text streamed as SSE events."""
         from app.services.agent_service import run_agent_loop_streaming
 
         mock_settings.max_tool_iterations = 10
@@ -263,8 +268,11 @@ class TestRunAgentLoopStreaming:
 
         mock_llm.get_chat_completion_with_tools = AsyncMock(side_effect=[tool_resp, text_resp])
 
-        mock_stream = AsyncMock()
-        mock_llm.stream_chat_completion = AsyncMock(return_value=mock_stream)
+        async def _mock_stream():
+            from tests.test_doubles import MockChunk
+            yield MockChunk("Done", finish_reason="stop")
+
+        mock_llm.stream_chat_completion = AsyncMock(return_value=_mock_stream())
 
         mock_echo = AsyncMock(return_value="hi")
         mock_registry.get_tool.return_value = mock_echo
@@ -272,16 +280,18 @@ class TestRunAgentLoopStreaming:
         mock_registry.list_tools.return_value = ["echo"]
 
         messages = [{"role": "user", "content": "Echo hi streaming"}]
-        result = await run_agent_loop_streaming(messages)
+        events = []
+        async for event in run_agent_loop_streaming(messages):
+            events.append(event)
 
-        assert result is mock_stream
+        assert any("data: [DONE]" in e for e in events)
         assert mock_llm.get_chat_completion_with_tools.call_count == 2
         mock_llm.stream_chat_completion.assert_called_once()
 
     @patch("app.services.agent_service.settings")
     @patch("app.services.agent_service.llm_service")
     async def test_llm_error_returns_error_in_stream(self, mock_llm, mock_settings):
-        """LLM error in streaming path → returns error string."""
+        """LLM error in streaming path → error status + [DONE] in SSE stream."""
         from app.services.agent_service import run_agent_loop_streaming
 
         mock_settings.max_tool_iterations = 10
@@ -291,7 +301,9 @@ class TestRunAgentLoopStreaming:
         mock_llm.get_chat_completion_with_tools = AsyncMock(return_value="Error: connection refused")
 
         messages = [{"role": "user", "content": "Hi"}]
-        result = await run_agent_loop_streaming(messages)
+        events = []
+        async for event in run_agent_loop_streaming(messages):
+            events.append(event)
 
-        assert isinstance(result, str)
-        assert "Error" in result
+        assert any("connection refused" in e for e in events)
+        assert any("data: [DONE]" in e for e in events)

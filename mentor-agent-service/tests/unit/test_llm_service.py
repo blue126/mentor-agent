@@ -2,9 +2,8 @@
 
 from unittest.mock import AsyncMock, patch
 
-from tests.test_doubles import MockChunk
-
 from app.services.llm_service import get_chat_completion, stream_chat_completion
+from tests.test_doubles import MockChunk
 
 _MESSAGES = [{"role": "user", "content": "Hello"}]
 
