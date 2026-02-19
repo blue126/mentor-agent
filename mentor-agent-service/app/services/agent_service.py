@@ -12,7 +12,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.config import settings
-from app.services import llm_service
+from app.services import llm_service, prompt_service
 from app.tools import registry
 from app.utils.sse_generator import (
     make_done_event,
@@ -22,6 +22,17 @@ from app.utils.sse_generator import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+async def _inject_system_prompt(messages: list[dict[str, Any]]) -> None:
+    """Prepend or replace the system prompt at position 0 of messages."""
+    system_content = await prompt_service.load_system_prompt()
+    system_msg = {"role": "system", "content": system_content}
+
+    if messages and messages[0].get("role") == "system":
+        messages[0] = system_msg
+    else:
+        messages.insert(0, system_msg)
 
 
 async def _execute_tool(fn_name: str, fn_args_raw: str) -> str:
@@ -53,6 +64,7 @@ async def run_agent_loop(
     max_tokens: int | None = None,
 ) -> Any | str:
     """Non-streaming agent loop. Returns final LLM response object or error string."""
+    await _inject_system_prompt(messages)
     tools = registry.get_all_schemas()
     max_iterations = settings.max_tool_iterations
 
@@ -112,6 +124,7 @@ async def run_agent_loop_streaming(
     Returns an AsyncIterator[str] that yields formatted SSE events:
     status events, content deltas, and [DONE] terminator.
     """
+    await _inject_system_prompt(messages)
     resolved_model = model or settings.litellm_model
     queue: asyncio.Queue[str | None] = asyncio.Queue()
     done = asyncio.Event()
