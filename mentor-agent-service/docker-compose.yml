@@ -8,11 +8,17 @@ services:
       - "8100:8100"
     volumes:
       - agent-data:/app/data
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.example
+        required: true
     restart: unless-stopped
 
-  # open-webui: (Story 1.2)
-  # litellm-claude-code: (Story 1.2)
+  # open-webui: Configure externally; point to http://agent-service:8100/v1
+  # litellm-claude-code: External LiteLLM proxy at http://litellm-claude-code:4000/v1
+  #   Ensure this container is on the same Docker network as agent-service
+  #   so agent-service can resolve the litellm-claude-code hostname.
   # anki: (Epic 5)
 
 volumes:

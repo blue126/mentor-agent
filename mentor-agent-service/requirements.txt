@@ -1,0 +1,9 @@
+fastapi[standard]>=0.129.0
+uvicorn
+httpx
+litellm>=1.81.0
+aiosqlite
+pydantic-settings
+sqlalchemy[asyncio]>=2.0
+alembic>=1.18.0
+networkx

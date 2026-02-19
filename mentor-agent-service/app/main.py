@@ -1,9 +1,10 @@
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
-from app.routers import health
+from app.dependencies import verify_api_key
+from app.routers import chat, health
 
 
 @asynccontextmanager
@@ -18,6 +19,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     application.include_router(health.router)
+    application.include_router(chat.router, dependencies=[Depends(verify_api_key)])
     return application
 
 
