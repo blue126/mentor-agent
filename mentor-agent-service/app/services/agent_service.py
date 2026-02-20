@@ -21,7 +21,42 @@ from app.utils.sse_generator import (
     run_heartbeat,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.INFO)
+
+
+_TOOL_INTENT_KEYWORDS = {
+    "tool",
+    "tools",
+    "echo",
+    "knowledge",
+    "knowledge base",
+    "search",
+    "rag",
+    "notion",
+    "anki",
+    "quiz",
+    "practice",
+    "graph",
+    "progress",
+    "工具",
+    "知识库",
+    "检索",
+    "搜索",
+    "题",
+    "练习",
+    "进度",
+    "图谱",
+}
+
+
+def _should_use_tool_loop_for_streaming(messages: list[dict[str, Any]]) -> bool:
+    """Heuristic gate: only enter tool loop when latest user turn hints tool usage."""
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            content = str(message.get("content", "")).lower()
+            return any(keyword in content for keyword in _TOOL_INTENT_KEYWORDS)
+    return False
 
 
 async def _inject_system_prompt(messages: list[dict[str, Any]]) -> None:
@@ -69,6 +104,7 @@ async def run_agent_loop(
     max_iterations = settings.max_tool_iterations
 
     for iteration in range(max_iterations):
+        logger.info("tool-loop(non-stream) iteration=%s", iteration + 1)
         result = await llm_service.get_chat_completion_with_tools(
             messages=messages,
             tools=tools,
@@ -88,6 +124,7 @@ async def run_agent_loop(
 
         choice = result.choices[0]
         finish_reason = choice.finish_reason
+        logger.info("tool-loop(non-stream) finish_reason=%s", finish_reason)
 
         if finish_reason == "tool_calls" and getattr(choice.message, "tool_calls", None):
             # Append assistant message (with tool_calls) to conversation
@@ -95,9 +132,19 @@ async def run_agent_loop(
 
             # Execute each tool call
             for tool_call in choice.message.tool_calls:
+                logger.info(
+                    "tool-loop(non-stream) calling tool name=%s args=%s",
+                    tool_call.function.name,
+                    tool_call.function.arguments,
+                )
                 tool_result = await _execute_tool(
                     fn_name=tool_call.function.name,
                     fn_args_raw=tool_call.function.arguments,
+                )
+                logger.info(
+                    "tool-loop(non-stream) tool_result name=%s result=%s",
+                    tool_call.function.name,
+                    tool_result[:200],
                 )
                 messages.append({
                     "role": "tool",
@@ -131,9 +178,27 @@ async def run_agent_loop_streaming(
 
     async def _agent_loop() -> None:
         try:
+            # Fast path: avoid non-streaming tool planning for normal chat turns.
+            if not _should_use_tool_loop_for_streaming(messages):
+                stream_result = await llm_service.stream_chat_completion(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if isinstance(stream_result, str):
+                    await queue.put(make_status_event(f"⚠️ {stream_result}", resolved_model))
+                else:
+                    async for chunk in stream_result:
+                        chunk_dict = chunk.model_dump(exclude_none=True)
+                        await queue.put(f"data: {json.dumps(chunk_dict)}\n\n")
+                await queue.put(make_done_event())
+                return
+
             tools = registry.get_all_schemas()
             iteration = 0
             while iteration < settings.max_tool_iterations:
+                logger.info("tool-loop(stream) iteration=%s", iteration + 1)
                 result = await llm_service.get_chat_completion_with_tools(
                     messages=messages,
                     tools=tools,
@@ -155,6 +220,7 @@ async def run_agent_loop_streaming(
 
                 choice = result.choices[0]
                 finish_reason = choice.finish_reason
+                logger.info("tool-loop(stream) finish_reason=%s", finish_reason)
 
                 if finish_reason == "tool_calls" and getattr(choice.message, "tool_calls", None):
                     await queue.put(make_status_event("💭 Thinking...", resolved_model))
@@ -162,8 +228,18 @@ async def run_agent_loop_streaming(
 
                     for tool_call in choice.message.tool_calls:
                         fn_name = tool_call.function.name
+                        logger.info(
+                            "tool-loop(stream) calling tool name=%s args=%s",
+                            fn_name,
+                            tool_call.function.arguments,
+                        )
                         await queue.put(make_status_event(f"🔧 Running {fn_name}...", resolved_model))
                         tool_result = await _execute_tool(fn_name, tool_call.function.arguments)
+                        logger.info(
+                            "tool-loop(stream) tool_result name=%s result=%s",
+                            fn_name,
+                            tool_result[:200],
+                        )
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -179,6 +255,8 @@ async def run_agent_loop_streaming(
                     model=model,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    tools=tools,
+                    tool_choice="auto",
                 )
                 if isinstance(stream_result, str):
                     await queue.put(make_status_event(f"⚠️ {stream_result}", resolved_model))

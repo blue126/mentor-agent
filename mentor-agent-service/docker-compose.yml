@@ -33,7 +33,7 @@ services:
     ports:
       - "4000:4000"
     volumes:
-      - ${HOME}/.claude:/home/claude/.claude
+      - ${CLAUDE_AUTH_PATH:-/Users/weierfu/.claude}:/home/claude/.claude
     environment:
       - CLAUDE_TOKEN=${CLAUDE_TOKEN}
       - LITELLM_MASTER_KEY=${LITELLM_KEY}
