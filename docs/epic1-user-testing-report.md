@@ -14,9 +14,9 @@
 | 步骤 | 结果 | 备注 |
 |---|---|---|
 | Step 1 基础对话 | 通过 | 链路可用，能正常回复 |
-| Step 2 Mentor Persona 行为 | 部分通过 | 能先反问前置知识，但随后直接展开讲解 |
+| Step 2 Mentor Persona 行为 | 通过（最新复测） | 模型先做前置知识检查，未直接给定义 |
 | Step 3 Tool Loop | 通过 | 可见 Thinking/Running，`echo` 结果正确返回 |
-| Step 4 连续可用性 | 通过 | 同会话连续提问可持续回复 |
+| Step 4 连续可用性 | 通过（有文本泄露风险） | 会话连续可用，但一次回复末尾出现 `<system-reminder>` 非业务文本 |
 | Step 5 失败兜底（可选） | 通过 | 上游不可用时返回可理解错误，服务不崩溃 |
 
 ## 3. 分步骤测试与排障记录
@@ -59,13 +59,16 @@
     - 根因: `env_file` 顺序导致 `.env.example` 覆盖 `.env`。
     - 代码改动: `mentor-agent-service/docker-compose.yml` 调整 `env_file` 顺序。
 
-### Step 2: Mentor Persona 行为（部分通过）
+### Step 2: Mentor Persona 行为（通过）
 
 - 测试输入: `什么是闭包？`
 - 观察结果:
   - 模型先反问了前置知识（符合预期方向）。
   - 但未等待用户反馈即给出完整定义和示例（偏离“纯引导式”）。
-- 判定: 部分通过。
+- 最新复测结果:
+  - 输入 `什么是闭包`
+  - 模型先询问语言与作用域基础（前置检查），未直接输出闭包定义。
+- 判定: 通过（最新复测）。
 
 ### Step 3: Tool Loop（通过）
 
@@ -104,6 +107,16 @@
           - `stream_chat_completion(...)` 增加 `tools` / `tool_choice` 参数并透传。
         - `mentor-agent-service/app/services/agent_service.py`
           - 工具循环后流式收尾调用补传 `tools=tools`、`tool_choice="auto"`。
+  - **阶段 D：subscription 路径回归（通过）**
+    - 拓扑: Open WebUI -> `agent-service` -> `claude-max-proxy`（OAuth 订阅）
+    - 关键配置:
+      ```env
+      LITELLM_BASE_URL=http://host.docker.internal:3456/v1
+      LITELLM_MODEL=openai/claude-sonnet-4-6
+      ```
+    - 验证结果:
+      - 工具列表请求返回项目工具边界：`echo / search_knowledge_base / list_knowledge_bases`
+      - `用 echo 工具返回 hello tool loop` 返回成功（Thinking/Running + 正确结果）
 
 - 诊断日志证据（修复后）:
   ```text
@@ -119,23 +132,22 @@
   ```text
   💭 Thinking...
   🔧 Running echo...
-  工具返回的结果是：hello tool loop ✅
+  The echo tool confirmed: hello tool loop
   ```
 
 - 判定: 通过。
 
-- 外部依赖限制（关键发现）:
-  - 对 `cabinlab/litellm-claude-code` 上游代码检查发现，其自定义 provider (`providers/claude_agent_provider.py`) 当前实现为：
-    - `allowed_tools=[]`
-    - `max_turns=1`
-    - 将消息拼接为纯文本 prompt 后调用 Claude Agent SDK
-  - 这意味着该 provider 设计上并未透传项目自定义函数工具调用语义（OpenAI tool_calls），会导致“subscription 路径工具语境/能力不一致”问题。
+- 外部依赖说明:
+  - `litellm-claude-code` 路径曾出现工具语境不一致，不适合作为本轮验收 subscription 路径。
+  - `claude-max-proxy` 路径在本轮已通过 Step 3 验证。
 
 ### Step 4: 连续可用性（通过）
 
 - 测试输入: `继续解释上一步你做了什么`
 - 结果: 同会话持续可回复，会话未中断。
-- 备注: 在 Step 3 未稳定前，Step 4 内容曾被“无 echo 工具”语义污染；在 Step 3 修复后该影响已消除。
+- 备注:
+  - 在 Step 3 未稳定前，Step 4 内容曾被“无 echo 工具”语义污染；在 Step 3 修复后该影响已消除。
+  - 最新一次回复末尾出现 `<system-reminder>...</system-reminder>` 非业务文本，需作为输出清洗问题单独跟踪。
 
 ### Step 5: 失败兜底（通过，早期已覆盖）
 
@@ -172,12 +184,15 @@
 | T7 | Anthropic 路径 404/参数不一致 | 修正模型路由策略，不强改无前缀模型名 |
 | T8 | `UnsupportedParamsError` | 流式收尾请求补传 `tools/tool_choice` |
 | T9 | Step 3 复测通过 | Thinking/Running 可见，返回 `hello tool loop` |
+| T10 | subscription 回归（经 `claude-max-proxy`） | 工具边界正确，Step 3 再次通过 |
+| T11 | Step2/Step4 回归 | Step2 通过；Step4 通过但发现 `<system-reminder>` 文本泄露 |
 
 ## 6. 当前状态与下一步
 
 - 当前状态:
-  - Epic 1 的 Step 1/3/4/5 已通过，Step 2 部分通过。
+  - Epic 1 的 Step 1/2/3/4/5 已通过。
   - Tool Loop 核心链路已跑通并有日志证据。
+  - 存在一项非阻塞风险：偶发 `<system-reminder>` 文本泄露到用户可见回复。
 - 下一步建议:
-  - 补测并优化 Step 2（Mentor Persona 的“先问后讲”节奏约束）。
+  - 增加输出清洗（过滤 `<system-reminder>` 片段）并回归验证。
   - 回到性能专项：在 Step 3 稳定前提下重新测 TTFB，并记录基线与优化后数据。
