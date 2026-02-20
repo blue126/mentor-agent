@@ -23,8 +23,15 @@ def make_done_event() -> str:
 
 
 def make_heartbeat_event() -> str:
-    """Generate SSE comment for keepalive (ignored by clients, resets proxy timeouts)."""
-    return ": keepalive\n\n"
+    """Generate JSON heartbeat chunk to maximize client parser compatibility."""
+    payload = {
+        "id": "chatcmpl-heartbeat",
+        "object": "chat.completion.chunk",
+        "created": 0,
+        "model": "heartbeat",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+    }
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 async def queue_sse_stream(queue: asyncio.Queue[str | None]) -> AsyncIterator[str]:

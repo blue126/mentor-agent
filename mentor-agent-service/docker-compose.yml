@@ -10,17 +10,42 @@ services:
     volumes:
       - agent-data:/app/data
     env_file:
-      - path: .env
-        required: false
       - path: .env.example
         required: true
+      - path: .env
+        required: false
+    depends_on:
+      - litellm-claude-code
     restart: unless-stopped
 
-  # open-webui: Configure externally; point to http://agent-service:8100/v1
-  # litellm-claude-code: External LiteLLM proxy at http://litellm-claude-code:4000/v1
-  #   Ensure this container is on the same Docker network as agent-service
-  #   so agent-service can resolve the litellm-claude-code hostname.
+  open-webui:
+    container_name: open-webui
+    image: ghcr.io/open-webui/open-webui:latest
+    ports:
+      - "3000:8080"
+    volumes:
+      - open-webui-data:/app/backend/data
+    restart: unless-stopped
+
+  litellm-claude-code:
+    container_name: litellm-claude-code
+    image: ghcr.io/cabinlab/litellm-claude-code:latest
+    ports:
+      - "4000:4000"
+    volumes:
+      - ${HOME}/.claude:/home/claude/.claude
+    environment:
+      - CLAUDE_TOKEN=${CLAUDE_TOKEN}
+      - LITELLM_MASTER_KEY=${LITELLM_KEY}
+    restart: unless-stopped
+
+  # In Open WebUI, configure Connections -> OpenAI-compatible API:
+  # Base URL: http://agent-service:8100/v1
+  # API Key:  AGENT_API_KEY
+  # litellm-claude-code runs in this compose network.
+  # agent-service reaches it via: http://litellm-claude-code:4000/v1
   # anki: (Epic 5)
 
 volumes:
   agent-data:
+  open-webui-data:

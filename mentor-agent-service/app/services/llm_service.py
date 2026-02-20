@@ -8,6 +8,12 @@ import litellm
 from app.config import settings
 
 
+def _normalize_model_for_litellm(model: str) -> str:
+    if "/" in model:
+        return model
+    return f"openai/{model}"
+
+
 def _completion_kwargs(
     messages: list[dict[str, str]],
     stream: bool,
@@ -15,8 +21,9 @@ def _completion_kwargs(
     temperature: float | None,
     max_tokens: int | None,
 ) -> dict[str, Any]:
+    selected_model = _normalize_model_for_litellm(model or settings.litellm_model)
     kwargs: dict[str, Any] = {
-        "model": model or settings.litellm_model,
+        "model": selected_model,
         "messages": messages,
         "api_base": settings.litellm_base_url,
         "api_key": settings.litellm_key,
