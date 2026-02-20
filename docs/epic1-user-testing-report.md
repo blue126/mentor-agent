@@ -77,8 +77,11 @@
   - 期望看到 Thinking/Running + 最终结果包含 `hello tool loop`。
 
 - 问题排查路径（按时间顺序）:
-  - **阶段 A：工具语境混入（失败）**
-    - 现象: 模型声称没有 `echo`，并列出 `Task/Bash/Read/...`。
+  - **阶段 A：初始失败（工具语境混入）**
+    - 现象: 模型多次回复“没有 echo 工具”，并暴露 `Task/Bash/Read/...` 外部工具域。
+    - 关键对照:
+      - 前端会话: 返回外部工具域
+      - 后端注册: `echo/search_knowledge_base/list_knowledge_bases`
     - 后端核验命令:
       ```bash
       docker exec -it mentor-agent-service sh -lc "python - <<'PY'
@@ -90,35 +93,87 @@
       ```text
       ['echo', 'search_knowledge_base', 'list_knowledge_bases']
       ```
-    - 结论: 后端工具已注册，问题在上游工具语境。
-  - **阶段 B：切换到 API 路径做 A/B（继续定位）**
-    - 目标: 排除 Claude Code 订阅运行时工具语境干扰。
-    - 结果: 外部工具域问题消失，但出现不收敛/404/UnsupportedParams 等新问题。
-  - **阶段 C：模型路由与参数一致性修复（通过）**
-    - 关键问题 1: 无前缀模型名在 Anthropic 路径下路由异常。
-      - 代码改动: `mentor-agent-service/app/services/llm_service.py` 停止自动改写无前缀模型名。
-    - 关键问题 2: Anthropic 工具后续请求要求继续携带 `tools`。
-      - 典型报错:
-        ```text
-        litellm.UnsupportedParamsError: Anthropic doesn't support tool calling without tools= param specified
-        ```
-      - 代码改动:
+    - 结论: `agent-service` 工具注册正确，问题来自上游模型语境/provider 路径。
+
+  - **阶段 B：链路确认（排除前端错连）**
+    - 确认 Open WebUI 请求确实命中 `agent-service`。
+    - 验证命令:
+      ```bash
+      docker compose -f mentor-agent-service/docker-compose.yml logs -f --tail 200 agent-service
+      curl -sS http://127.0.0.1:8100/v1/models -H "Authorization: Bearer dev-token"
+      ```
+    - 关键输出:
+      ```text
+      POST /v1/chat/completions ... 200 OK
+      {"object":"list","data":[{"id":"...","owned_by":"mentor-agent-service"}]}
+      ```
+    - 结论: 入口链路正确，问题在上游调用行为而非 Open WebUI 连接对象。
+
+  - **阶段 C：A/B 切到 Anthropic API 路径（继续定位）**
+    - 目的: 与 subscription 路径对照，排除“Claude Code 工具语境污染”。
+    - 现象变化:
+      - 外部工具域污染消失
+      - 但出现新问题：`Tool use loop reached maximum iterations (10)`、`UnsupportedParamsError`。
+    - 关键报错:
+      ```text
+      Error: Tool use loop reached maximum iterations (10)
+      litellm.UnsupportedParamsError: Anthropic doesn't support tool calling without tools= param specified
+      ```
+    - 结论: 问题从“工具不可见”收敛为“工具后续请求参数一致性”。
+
+  - **阶段 D：参数一致性修复（核心修复）**
+    - 修复点 1（模型路由）:
+      - 现象: 不同上游对 model 前缀要求不同，导致 `LLM Provider NOT provided` / `Not Found`。
+      - 改动: `mentor-agent-service/app/services/llm_service.py`
+        - `_normalize_model_for_litellm` 按 `LITELLM_BASE_URL` 区分路由：
+          - Anthropic API 路径保留原 model
+          - OpenAI-compatible 路径补 `openai/` 前缀
+    - 修复点 2（工具后续请求）:
+      - 现象: 工具执行后收尾流式请求未携带 `tools`，Anthropic 直接报错。
+      - 改动:
         - `mentor-agent-service/app/services/llm_service.py`
-          - `stream_chat_completion(...)` 增加 `tools` / `tool_choice` 参数并透传。
+          - `stream_chat_completion(...)` 增加 `tools` / `tool_choice` 参数并透传
         - `mentor-agent-service/app/services/agent_service.py`
-          - 工具循环后流式收尾调用补传 `tools=tools`、`tool_choice="auto"`。
-  - **阶段 D：subscription 路径回归（通过）**
-    - 拓扑: Open WebUI -> `agent-service` -> `claude-max-proxy`（OAuth 订阅）
+          - 工具循环收尾流式调用补传 `tools=tools`、`tool_choice="auto"`
+
+  - **阶段 E：增强可观测性（用于确认收敛）**
+    - 增加工具循环诊断日志（stream/non-stream）：`iteration`、`finish_reason`、`tool args`、`tool_result`。
+    - 关键日志样本:
+      ```text
+      tool-loop(stream) iteration=1
+      tool-loop(stream) finish_reason=tool_calls
+      tool-loop(stream) calling tool name=echo args={"message": "hello tool loop"}
+      tool-loop(stream) tool_result name=echo result=hello tool loop
+      tool-loop(stream) iteration=2
+      tool-loop(stream) finish_reason=stop
+      ```
+    - 结论: 工具循环从“重复调用/不收敛”变为“2轮收敛”。
+
+  - **阶段 F（前置背景）：subscription 路径替换与验证准备**
+    - 背景:
+      - 原 subscription 上游（`litellm-claude-code`）在本次验证中多次出现工具语境不一致。
+      - 为验证“订阅模式是否仍可让 `agent-service` 主导工具”，引入对照上游 `claude-max-proxy`。
+    - 目标:
+      - 保持入口不变（Open WebUI 始终连 `agent-service`），仅替换 `agent-service` 的上游 LLM 代理。
+      - 排除“前端直连代理导致看不到项目工具”的误判。
+    - 准备动作:
+      - 启动 `claude-max-proxy` 并验证 `/health`、`/v1/models`。
+      - 将代理模型映射收敛为 4.5/4.6，避免历史 4.0/别名混淆。
+      - 确认 OpenAI-compatible 模型名在上游可用（`openai/claude-sonnet-4-6` 直测通过）。
+
+  - **阶段 G：subscription 路径最终回归（通过）**
+    - 采用链路: Open WebUI -> `agent-service` -> `claude-max-proxy`（OAuth 订阅）
     - 关键配置:
       ```env
       LITELLM_BASE_URL=http://host.docker.internal:3456/v1
       LITELLM_MODEL=openai/claude-sonnet-4-6
       ```
-    - 验证结果:
-      - 工具列表请求返回项目工具边界：`echo / search_knowledge_base / list_knowledge_bases`
-      - `用 echo 工具返回 hello tool loop` 返回成功（Thinking/Running + 正确结果）
+    - 回归结果:
+      - 工具列表查询返回项目工具边界（`echo/search_knowledge_base/list_knowledge_bases`）
+      - `用 echo 工具返回 hello tool loop` 成功（Thinking/Running + 正确结果）
+      - 证明 subscription 路径可在 `agent-service` 主导下稳定工作
 
-- 诊断日志证据（修复后）:
+- 诊断日志证据（关键收敛片段）:
   ```text
   tool-loop(stream) iteration=1
   tool-loop(stream) finish_reason=tool_calls
@@ -140,6 +195,7 @@
 - 外部依赖说明:
   - `litellm-claude-code` 路径曾出现工具语境不一致，不适合作为本轮验收 subscription 路径。
   - `claude-max-proxy` 路径在本轮已通过 Step 3 验证。
+  - 对 `claude-max-proxy` 的模型映射做了 4.5/4.6 对齐，避免 4.0 别名干扰测试。
 
 ### Step 4: 连续可用性（通过）
 
