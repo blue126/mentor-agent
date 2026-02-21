@@ -57,3 +57,38 @@ def test_alembic_upgrade_creates_sessions_table():
     assert "started_at" in tables["sessions"]
     assert "ended_at" in tables["sessions"]
     assert "summary" in tables["sessions"]
+
+
+def test_alembic_upgrade_creates_topics_table():
+    """alembic upgrade head must create topics table from migration 003."""
+    tables = _run_migrations_on_fresh_db()
+    assert "topics" in tables
+    assert "id" in tables["topics"]
+    assert "name" in tables["topics"]
+    assert "description" in tables["topics"]
+    assert "source_material" in tables["topics"]
+    assert "created_at" in tables["topics"]
+
+
+def test_alembic_upgrade_creates_concepts_table():
+    """alembic upgrade head must create concepts table from migration 003."""
+    tables = _run_migrations_on_fresh_db()
+    assert "concepts" in tables
+    assert "id" in tables["concepts"]
+    assert "topic_id" in tables["concepts"]
+    assert "name" in tables["concepts"]
+    assert "definition" in tables["concepts"]
+    assert "difficulty" in tables["concepts"]
+    assert "created_at" in tables["concepts"]
+
+
+def test_alembic_upgrade_creates_concept_edges_table():
+    """alembic upgrade head must create concept_edges table from migration 003."""
+    tables = _run_migrations_on_fresh_db()
+    assert "concept_edges" in tables
+    assert "id" in tables["concept_edges"]
+    assert "source_concept_id" in tables["concept_edges"]
+    assert "target_concept_id" in tables["concept_edges"]
+    assert "relationship_type" in tables["concept_edges"]
+    assert "weight" in tables["concept_edges"]
+    assert "created_at" in tables["concept_edges"]
