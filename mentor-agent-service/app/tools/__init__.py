@@ -1,6 +1,7 @@
 """Tools package — global registry instance with registered tools."""
 
 from app.tools.echo_tool import echo
+from app.tools.extract_relationships_tool import extract_concept_relationships
 from app.tools.learning_plan_tool import generate_learning_plan, get_learning_plan
 from app.tools.registry import ToolRegistry
 from app.tools.search_knowledge_base_tool import list_knowledge_bases, search_knowledge_base
@@ -142,6 +143,30 @@ registry.register(
                 },
             },
             "required": [],
+        },
+    },
+)
+
+# Register extract_concept_relationships tool
+registry.register(
+    name="extract_concept_relationships",
+    func=extract_concept_relationships,
+    schema={
+        "description": (
+            "Analyze concepts within a topic and discover prerequisite and related relationships between them. "
+            "Use this after generating a learning plan to build the knowledge graph with meaningful connections. "
+            "The tool loads all concepts for the given topic, uses AI to identify relationships, "
+            "and stores them in the knowledge graph for prerequisite checking and cross-linking."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic_name": {
+                    "type": "string",
+                    "description": "The name of the topic whose concepts should be analyzed for relationships",
+                },
+            },
+            "required": ["topic_name"],
         },
     },
 )

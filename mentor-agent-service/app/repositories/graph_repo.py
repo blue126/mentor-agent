@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Concept, ConceptEdge, Topic
@@ -178,6 +178,29 @@ class GraphRepository:
         """Return all edges targeting a given concept."""
         result = await self._session.execute(
             select(ConceptEdge).where(ConceptEdge.target_concept_id == target_concept_id)
+        )
+        return [
+            {
+                "id": row.id,
+                "source_concept_id": row.source_concept_id,
+                "target_concept_id": row.target_concept_id,
+                "relationship_type": row.relationship_type,
+                "weight": row.weight,
+            }
+            for row in result.scalars().all()
+        ]
+
+    async def get_edges_for_concepts(self, concept_ids: list[int]) -> list[dict]:
+        """Return all edges where source OR target is in concept_ids."""
+        if not concept_ids:
+            return []
+        result = await self._session.execute(
+            select(ConceptEdge).where(
+                or_(
+                    ConceptEdge.source_concept_id.in_(concept_ids),
+                    ConceptEdge.target_concept_id.in_(concept_ids),
+                )
+            )
         )
         return [
             {

@@ -235,3 +235,69 @@ class TestGraphService:
         assert len(concepts) == 2
         names = {c["name"] for c in concepts}
         assert names == {"C1", "C2"}
+
+    # --- Story 2.4: get_edges_for_concepts ---
+
+    async def test_get_edges_for_concepts_with_data(self, db_session):
+        """get_edges_for_concepts returns edges where source OR target is in concept_ids."""
+        a = await graph_service.add_concept(db_session, "A")
+        b = await graph_service.add_concept(db_session, "B")
+        c = await graph_service.add_concept(db_session, "C")
+        await graph_service.add_edge(db_session, a["id"], b["id"], "prerequisite")
+        await graph_service.add_edge(db_session, b["id"], c["id"], "related")
+
+        # Query [A, B] → both edges returned (A→B has A in set; B→C has B in set)
+        edges = await graph_service.get_edges_for_concepts(db_session, [a["id"], b["id"]])
+        assert len(edges) == 2
+        edge_tuples = {(e["source_concept_id"], e["target_concept_id"]) for e in edges}
+        assert (a["id"], b["id"]) in edge_tuples
+        assert (b["id"], c["id"]) in edge_tuples
+
+    async def test_get_edges_for_concepts_empty(self, db_session):
+        """get_edges_for_concepts returns empty list when no edges exist."""
+        a = await graph_service.add_concept(db_session, "A")
+        edges = await graph_service.get_edges_for_concepts(db_session, [a["id"]])
+        assert edges == []
+
+    # --- Story 2.4: get_concept_by_name ---
+
+    async def test_get_concept_by_name_found(self, db_session):
+        """get_concept_by_name returns concept when found."""
+        await graph_service.add_concept(db_session, "Variables", definition="Data containers")
+        result = await graph_service.get_concept_by_name(db_session, "Variables")
+        assert result is not None
+        assert result["name"] == "Variables"
+        assert result["definition"] == "Data containers"
+
+    async def test_get_concept_by_name_not_found(self, db_session):
+        """get_concept_by_name returns None when not found."""
+        result = await graph_service.get_concept_by_name(db_session, "NonExistent")
+        assert result is None
+
+    # --- Story 2.4: add_edge auto_commit ---
+
+    async def test_add_edge_auto_commit_false_no_commit(self, db_session):
+        """add_edge auto_commit=False should flush but not commit; rollback discards."""
+        a = await graph_service.add_concept(db_session, "A")
+        b = await graph_service.add_concept(db_session, "B")
+        edge = await graph_service.add_edge(
+            db_session, a["id"], b["id"], "prerequisite", auto_commit=False
+        )
+        assert isinstance(edge["id"], int)
+        # Rollback should discard the edge
+        await db_session.rollback()
+        from app.repositories.graph_repo import GraphRepository
+        repo = GraphRepository(db_session)
+        edges = await repo.get_all_edges()
+        assert len(edges) == 0
+
+    async def test_add_edge_auto_commit_true_default(self, db_session):
+        """add_edge with default auto_commit=True should commit and update in-memory graph."""
+        a = await graph_service.add_concept(db_session, "A")
+        b = await graph_service.add_concept(db_session, "B")
+        edge = await graph_service.add_edge(db_session, a["id"], b["id"], "prerequisite")
+        assert isinstance(edge["id"], int)
+
+        # Verify in-memory graph has the edge
+        G = graph_service._digraph
+        assert G.has_edge(a["id"], b["id"])

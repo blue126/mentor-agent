@@ -84,6 +84,18 @@ async def get_concepts_by_topic(session: AsyncSession, topic_id: int) -> list[di
     return await repo.get_concepts_by_topic(topic_id)
 
 
+async def get_concept_by_name(session: AsyncSession, name: str) -> dict[str, Any] | None:
+    """Return concept dict by name, or None if not found."""
+    repo = GraphRepository(session)
+    return await repo.get_concept_by_name(name)
+
+
+async def get_edges_for_concepts(session: AsyncSession, concept_ids: list[int]) -> list[dict[str, Any]]:
+    """Return all edges where source or target is in concept_ids."""
+    repo = GraphRepository(session)
+    return await repo.get_edges_for_concepts(concept_ids)
+
+
 async def add_topic(
     session: AsyncSession,
     name: str,
@@ -149,11 +161,16 @@ async def add_edge(
     target_concept_id: int,
     relationship_type: str,
     weight: float = 1.0,
+    *,
+    auto_commit: bool = True,
 ) -> dict[str, Any]:
     """Create an edge, write to DB and add to in-memory MultiDiGraph.
 
     Validates relationship_type and concept existence before writing.
     Returns {id, source_concept_id, target_concept_id, relationship_type}.
+
+    When auto_commit=False, only flushes to get the ID without commit or graph update.
+    Caller must commit and call load_graph() to rebuild the in-memory graph.
     """
     # Input validation
     if relationship_type not in _VALID_RELATIONSHIP_TYPES:
@@ -172,25 +189,28 @@ async def add_edge(
         raise ValueError(f"Target concept {target_concept_id} does not exist")
 
     edge_id = await repo.create_edge(source_concept_id, target_concept_id, relationship_type, weight)
-    await session.commit()
 
-    # Update in-memory graph
-    try:
-        G = await _ensure_loaded(session)
-        G.add_edge(
-            source_concept_id,
-            target_concept_id,
-            key=edge_id,
-            relationship_type=relationship_type,
-            weight=weight,
-        )
-    except Exception:
-        logger.exception("Failed to update in-memory graph after add_edge; rebuilding")
+    if auto_commit:
+        await session.commit()
+
+        # Update in-memory graph
         try:
-            await load_graph(session)
+            G = await _ensure_loaded(session)
+            G.add_edge(
+                source_concept_id,
+                target_concept_id,
+                key=edge_id,
+                relationship_type=relationship_type,
+                weight=weight,
+            )
         except Exception:
-            logger.exception("Graph rebuild also failed; will retry on next access")
-            reset_graph()
+            logger.exception("Failed to update in-memory graph after add_edge; rebuilding")
+            try:
+                await load_graph(session)
+            except Exception:
+                logger.exception("Graph rebuild also failed; will retry on next access")
+                reset_graph()
+    # else: repo.create_edge already flushed; caller manages commit/rollback
 
     return {
         "id": edge_id,
