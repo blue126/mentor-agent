@@ -300,7 +300,7 @@ class TestRunAgentLoopStreaming:
 
         mock_llm.get_chat_completion_with_tools = AsyncMock(return_value="Error: connection refused")
 
-        messages = [{"role": "user", "content": "Hi"}]
+        messages = [{"role": "user", "content": "Search for something"}]
         events = []
         async for event in run_agent_loop_streaming(messages):
             events.append(event)

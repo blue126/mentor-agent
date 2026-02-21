@@ -146,7 +146,7 @@
 ### 步骤 5：记录与文档联动 `[Agent]`
 
 - 操作:
-  1. 回填测试结果到 `docs/epic1-user-testing-report.md`。
+  1. 回填测试结果到 `docs/testing/reports/testing-report-epic1.md`。
   2. 按评估报告 Section 6 的变更清单，更新以下高影响设计文档：
      - `_bmad-output/planning-artifacts/architecture.md` — 硬约束改为双路径、新增术语表与基线声明
      - `_bmad-output/implementation-artifacts/1-2-openai-compatible-api-basic-llm-proxy.md` — 上游模式改为路径无关描述

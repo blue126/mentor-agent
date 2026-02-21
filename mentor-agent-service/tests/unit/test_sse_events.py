@@ -49,7 +49,13 @@ def test_make_done_event():
 
 
 def test_make_heartbeat_event():
-    """Heartbeat event: SSE comment format '': keepalive\\n\\n'."""
+    """Heartbeat event: JSON chunk with chatcmpl-heartbeat id."""
     from app.utils.sse_generator import make_heartbeat_event
 
-    assert make_heartbeat_event() == ": keepalive\n\n"
+    event = make_heartbeat_event()
+    assert event.startswith("data: ")
+    assert event.endswith("\n\n")
+    payload = json.loads(event[6:-2])
+    assert payload["id"] == "chatcmpl-heartbeat"
+    assert payload["object"] == "chat.completion.chunk"
+    assert payload["choices"][0]["delta"] == {}

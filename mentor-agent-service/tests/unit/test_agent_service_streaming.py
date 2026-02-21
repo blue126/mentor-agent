@@ -189,7 +189,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_registry.get_tool.return_value = mock_echo
         mock_registry.get_all_schemas.return_value = []
 
-        messages = [{"role": "user", "content": "Loop"}]
+        messages = [{"role": "user", "content": "Loop the echo tool"}]
         events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
 
         # Should contain max iterations warning
@@ -221,7 +221,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_registry.get_tool.return_value = mock_echo
         mock_registry.get_all_schemas.return_value = []
 
-        messages = [{"role": "user", "content": "Crash"}]
+        messages = [{"role": "user", "content": "Use the echo tool"}]
         events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
 
         # Tool error is fed back to LLM, stream should still complete
@@ -267,7 +267,7 @@ class TestRunAgentLoopStreamingSSE:
             return_value="Error: LLM service unavailable"
         )
 
-        messages = [{"role": "user", "content": "Hi"}]
+        messages = [{"role": "user", "content": "Search for something"}]
         events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
 
         # Should contain error status and [DONE]
@@ -298,7 +298,7 @@ class TestRunAgentLoopStreamingSSE:
 
         mock_registry.get_all_schemas.return_value = []
 
-        messages = [{"role": "user", "content": "Bad JSON"}]
+        messages = [{"role": "user", "content": "Use echo tool"}]
         events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
 
         # Stream should complete normally
@@ -347,11 +347,11 @@ class TestRunAgentLoopStreamingSSE:
         mock_llm.get_chat_completion_with_tools = AsyncMock(side_effect=_hanging_completion)
         mock_llm.stream_chat_completion = AsyncMock()
 
-        messages = [{"role": "user", "content": "Hi"}]
+        messages = [{"role": "user", "content": "Search for something"}]
         gen = run_agent_loop_streaming(messages, "test-model")
 
         first_event = await asyncio.wait_for(anext(gen), timeout=1.0)
-        assert first_event == ": keepalive\n\n"
+        assert first_event.startswith("data: ") and "chatcmpl-heartbeat" in first_event
 
         await asyncio.wait_for(gen.aclose(), timeout=1.0)
 

@@ -323,7 +323,7 @@ async def test_sse_stream_includes_heartbeat_when_execution_is_slow():
             resp = await ac.post(
                 "/v1/chat/completions",
                 json={
-                    "messages": [{"role": "user", "content": "Run slowly"}],
+                    "messages": [{"role": "user", "content": "Run echo tool slowly"}],
                     "model": "test-model",
                     "stream": True,
                 },
@@ -332,5 +332,5 @@ async def test_sse_stream_includes_heartbeat_when_execution_is_slow():
 
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
-    assert ": keepalive\n\n" in resp.text
+    assert "chatcmpl-heartbeat" in resp.text
     assert "data: [DONE]" in resp.text

@@ -108,7 +108,7 @@ async def test_agent_loop_rag_tool_use():
             resp = await ac.post(
                 "/v1/chat/completions",
                 json={
-                    "messages": [{"role": "user", "content": "What is machine learning?"}],
+                    "messages": [{"role": "user", "content": "Search knowledge base for machine learning"}],
                     "model": "test-model",
                     "stream": True,
                 },

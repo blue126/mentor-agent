@@ -21,7 +21,7 @@ async def test_heartbeat_sends_keepalive():
     while not queue.empty():
         events.append(queue.get_nowait())
     assert len(events) >= 2
-    assert all(e == ": keepalive\n\n" for e in events)
+    assert all(e.startswith("data: ") and "chatcmpl-heartbeat" in e for e in events)
 
 
 async def test_heartbeat_stops_on_done():

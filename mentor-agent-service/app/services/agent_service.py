@@ -21,10 +21,11 @@ from app.utils.sse_generator import (
     run_heartbeat,
 )
 
-logger = logging.getLogger("uvicorn.error")
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
 
 
+# Maintenance contract: when adding/removing tools in registry, update this set
+# and ensure streaming tests use messages containing at least one keyword.
 _TOOL_INTENT_KEYWORDS = {
     "tool",
     "tools",

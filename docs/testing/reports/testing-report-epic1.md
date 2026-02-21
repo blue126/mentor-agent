@@ -1,13 +1,13 @@
 # Epic 1 人工验证测试报告（Open WebUI）
 
 日期: 2026-02-20  
-测试依据: `docs/user-testing-plan-epic1.md`  
+测试依据: `docs/testing/plans/testing-plan-epic1.md`  
 测试环境: macOS + Docker + devcontainer/VS Code Port Forward
 
 ## 1. 测试目标与范围
 
 - 目标: 验证 Epic 1 核心链路可用（Open WebUI -> Agent Service -> LiteLLM/Anthropic -> Tool Loop）。
-- 范围: 按 `docs/user-testing-plan-epic1.md` 的 Step 1-5 执行，记录故障、排查、修复与结论。
+- 范围: 按 `docs/testing/plans/testing-plan-epic1.md` 的 Step 1-5 执行，记录故障、排查、修复与结论。
 
 ## 2. 结果总览
 

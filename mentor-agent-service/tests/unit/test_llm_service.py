@@ -79,4 +79,4 @@ async def test_stream_chat_completion_uses_config_model_when_request_model_missi
     await stream_chat_completion(_MESSAGES, model=None)
 
     call_kwargs = mock_litellm.acompletion.call_args.kwargs
-    assert call_kwargs["model"] == "model-from-config"
+    assert call_kwargs["model"] == "openai/model-from-config"

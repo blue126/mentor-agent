@@ -8,12 +8,20 @@ import litellm
 from app.config import settings
 
 
+# URL markers indicating direct Anthropic API access (no openai/ prefix needed).
+# When base_url points to a proxy (claude-max-proxy, LiteLLM), models need
+# the "openai/" prefix so LiteLLM treats them as OpenAI-compatible targets.
+# P2: once LITELLM_* naming is neutralised, this sniffing can be simplified.
+_DIRECT_API_URL_MARKERS = ("api.anthropic.com",)
+
+
 def _normalize_model_for_litellm(model: str) -> str:
+    """Add 'openai/' prefix when routing through a proxy, skip for direct API."""
     if "/" in model:
         return model
 
     base_url = settings.litellm_base_url.lower()
-    if "api.anthropic.com" in base_url:
+    if any(marker in base_url for marker in _DIRECT_API_URL_MARKERS):
         return model
 
     return f"openai/{model}"

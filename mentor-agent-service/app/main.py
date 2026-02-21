@@ -1,7 +1,10 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
+
+logging.getLogger("app").setLevel(logging.INFO)
 
 from app.dependencies import verify_api_key
 from app.routers import chat, health

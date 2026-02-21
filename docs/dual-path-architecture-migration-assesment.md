@@ -145,9 +145,9 @@ Open WebUI → Agent Service ──────┤
 
 | 文件 | 改动说明 |
 |------|---------|
-| `docs/epic1-user-testing-report.md` | 添加元信息头 + 基线声明 + 弃用路径说明 |
+| `docs/testing/reports/testing-report-epic1.md` | 添加元信息头 + 基线声明 + 弃用路径说明 |
 | `docs/subscription-provider-feasibility-report.md` | 升级为决策记录：附状态标签 `Adopted with constraints` |
-| `docs/user-testing-plan-epic1.md` | 按 profile 分区验收步骤 |
+| `docs/testing/plans/testing-plan-epic1.md` | 按 profile 分区验收步骤 |
 | `plan.md` | 架构图、容器编排、.env、部署顺序 → 引用 SSOT，不重复描述 |
 
 ## 7. 代码影响（mentor-agent-service/）

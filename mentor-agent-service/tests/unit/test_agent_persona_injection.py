@@ -92,7 +92,7 @@ class TestPersonaInjectionStreaming:
 
         mock_llm.stream_chat_completion = AsyncMock(return_value=_mock_stream())
 
-        messages = [{"role": "user", "content": "Hi"}]
+        messages = [{"role": "user", "content": "Search for something"}]
         events = []
         async for event in run_agent_loop_streaming(messages):
             events.append(event)

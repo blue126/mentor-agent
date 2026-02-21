@@ -1,124 +1,115 @@
-# 双路径架构——代码重构实施计划（初稿）
+# 代码重构计划（R2-R5 + 前置修复）
 
-Status: Draft
-日期: 2026-02-20
+Status: Draft → Ready for execution
+日期: 2026-02-21
 关联文档: [dual-path-migration-implementation-guide.md](dual-path-migration-implementation-guide.md)
 
-## 背景
+## Context
 
-Epic 1 调试/稳定化阶段（Story 1.6）在业务代码中引入了多处 hotfix，使双路径架构在功能上可用。但这些改动以"先跑通"为目标，部分实现属于启发式 hack 或调试期遗留，需要在继续新功能开发前正式重构。
+Epic 1 调试期（Story 1.6）引入了多处 hotfix 使双路径架构可用。基础设施迁移（claude-max-proxy 容器化）已完成。本次重构清理代码质量问题，确保在继续 Story 2-2 开发前代码基线稳定。
 
-本计划与[实施指南](dual-path-migration-implementation-guide.md)互补——实施指南覆盖基础设施编排（docker-compose、容器化、env 配置），本计划覆盖业务代码层的清理与加固。
+**紧急发现**：`.env` 新增的 `CLAUDE_TOKENS_PATH` / `CLAUDE_AUTH_PATH`（docker-compose 变量）导致 pydantic-settings 报 `extra_forbidden` 错误，**所有测试当前无法运行**。
 
-## 执行顺序
+## 执行步骤
 
-建议在实施指南步骤 1（docker-compose 更新）完成后、步骤 4（连接校验）之前执行，因为部分重构项（如 docker-compose 硬编码路径）与步骤 1 有重叠。
+### Step 0：修复 pydantic-settings extra fields（阻塞项）
 
----
+**文件**：`mentor-agent-service/app/config.py:22`
 
-## 高优先级（迁移前提）
+```python
+# 当前
+model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+# 改为
+model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+```
 
-### R1: docker-compose.yml 硬编码宿主路径清理
+- 原因：`.env` 包含 docker-compose 专用变量（`CLAUDE_TOKENS_PATH`、`CLAUDE_AUTH_PATH`），app 不需要它们
+- 行为变更：无（已声明字段不受影响）
+- 测试影响：**解除测试阻塞**
 
-- **文件:** `mentor-agent-service/docker-compose.yml`
-- **现状:** `CLAUDE_AUTH_PATH` fallback 硬编码为 `/Users/weierfu/.claude`（macOS 开发机路径）
-- **问题:** 跨环境不可移植，CI/CD 和其他开发者无法直接使用
-- **改动:** 移除硬编码 fallback，改为纯环境变量引用或在 `.env.example` 中提供说明
-- **与实施指南关系:** 步骤 1 会重构 docker-compose，可合并处理
+### Step 1（R5）：config.py 默认值对齐
 
----
+**文件**：`mentor-agent-service/app/config.py:6`
 
-## 中优先级（代码质量 & 可维护性）
+```python
+# 当前
+litellm_base_url: str = "http://litellm-claude-code:4000/v1"
+# 改为
+litellm_base_url: str = "http://claude-max-proxy:3456/v1"
+```
 
-### R2: `_normalize_model_for_litellm()` 路由逻辑加固
+- 原因：默认值指向已降级为 fallback 的旧服务，应与 `.env.example` 一致
+- 行为变更：仅影响无 `.env` 时的零配置启动（旧默认本来也不可用）
+- 测试影响：无（测试 mock settings）
 
-- **文件:** `mentor-agent-service/app/services/llm_service.py`
-- **现状:**
-  ```python
-  def _normalize_model_for_litellm(model: str) -> str:
-      if "/" in model:
-          return model
-      base_url = settings.litellm_base_url.lower()
-      if "api.anthropic.com" in base_url:
-          return model
-      return f"openai/{model}"
-  ```
-- **问题:** 靠 URL 子串嗅探区分 profile——脆弱，新增上游（如 Gemini proxy）时需手动扩展条件
-- **方案选项:**
-  - A) 引入显式 `LLM_PROFILE` 配置变量（`subscription` / `api`），按 profile 分发（干净但多一个 env var）
-  - B) 保留 URL 嗅探，但抽取为配置映射表 + 添加边界条件注释（最小改动）
-- **建议:** 方案 B（最小改动原则），P2 重命名时再考虑方案 A
-- **待 review 确认**
+### Step 2（R2）：`_normalize_model_for_litellm()` 加固
 
-### R3: logger 配置恢复标准模式
+**文件**：`mentor-agent-service/app/services/llm_service.py:11-19`
 
-- **文件:** `mentor-agent-service/app/services/agent_service.py`
-- **现状:**
-  ```python
-  logger = logging.getLogger("uvicorn.error")
-  logger.setLevel(logging.INFO)
-  ```
-- **问题:** 调试期为确保日志可见而 hack 到 `uvicorn.error`，不符合标准 logging 层级管理
-- **改动:** 恢复为 `logging.getLogger(__name__)`，通过 uvicorn/logging config 统一控制日志级别
-- **验证:** 重构后确认 tool-loop 诊断日志在 `docker compose logs` 中仍可见
+- 提取 `"api.anthropic.com"` 为命名常量 `_DIRECT_API_URL_MARKERS`
+- 添加 docstring 说明双路径逻辑和 P2 迁移方向
+- **不改函数签名和返回值**
 
-### R4: `_TOOL_INTENT_KEYWORDS` 启发式标注
+### Step 3（R3）：logger 恢复标准模式
 
-- **文件:** `mentor-agent-service/app/services/agent_service.py`
-- **现状:**
-  ```python
-  _TOOL_INTENT_KEYWORDS = {
-      "tool", "tools", "echo", "knowledge", "knowledge base", "search", "rag",
-      "notion", "anki", "quiz", "practice", "graph", "progress",
-      "工具", "知识库", "检索", "搜索", "题", "练习", "进度", "图谱",
-  }
-  ```
-- **问题:** 硬编码关键词集合，新增工具时需手动同步；false negative 会导致工具请求走 fast path 跳过 tool loop
-- **方案:**
-  - 当前阶段：添加注释说明维护契约（"新增工具时须同步更新此集合"），标注为已知限制
-  - 未来改进：考虑从 tool registry 自动提取关键词，或改用 LLM 自身判断（让 planning call 决定是否使用工具）
-- **改动量:** 仅添加注释，不改逻辑
+分两步：
 
-### R5: config.py 默认值与 .env.example 对齐
+**A. `mentor-agent-service/app/main.py`**：添加 `logging.getLogger("app").setLevel(logging.INFO)`
+- 确保 `app.*` 子 logger 的 INFO 级日志传播到 uvicorn 的 root handler
 
-- **文件:** `mentor-agent-service/app/config.py`
-- **现状:** `litellm_model: str = "sonnet"` — 裸模型名，依赖 `_normalize_model_for_litellm()` 运行时补前缀
-- **问题:** 默认值与 `.env.example` 中的 `LITELLM_MODEL=sonnet` 一致，但与实施指南附录 A 的 `openai/claude-sonnet-4-6` 不一致
-- **.env.example 当前值:** `LITELLM_MODEL=sonnet`
-- **改动:** 确认 `.env.example` 和 `config.py` 默认值策略统一（裸名 + runtime normalize vs 完整名），记录决策
-- **待 review 确认**
+**B. `mentor-agent-service/app/services/agent_service.py:24-25`**：
+```python
+# 当前
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.INFO)
+# 改为
+logger = logging.getLogger(__name__)
+```
 
----
+- 行为变更：日志中 logger 名从 `uvicorn.error` 变为 `app.services.agent_service`
+- 验证：docker compose logs 中确认 tool-loop 诊断日志仍可见
 
-## 低优先级（P2 窗口）
+### Step 4（R4）：`_TOOL_INTENT_KEYWORDS` 维护标注 + 测试修复
 
-### R6: `LITELLM_*` 全量重命名
+**A. `agent_service.py:28`**：在 `_TOOL_INTENT_KEYWORDS` 上方添加维护契约注释
 
-- **范围:** ~27 个文件，~55 处引用
-- **目标:** `LITELLM_BASE_URL` → `LLM_BASE_URL`，`LITELLM_KEY` → `LLM_KEY`，`LITELLM_MODEL` → `LLM_MODEL`
-- **状态:** 评估报告已标注 P2，收益仅为命名一致性，当前不执行
-- **触发条件:** 有合适的低风险窗口（如 Epic 间歇期），且所有 Story 测试通过
+**B. 修复预先存在的测试错误**（关键发现）：
 
----
+Story 1.6 添加了 `_should_use_tool_loop_for_streaming()` 关键词门控，但未更新 Story 1.4 的流式测试。以下测试使用的消息不含工具关键词，导致走了 fast path 而非预期的 tool-loop path：
+
+| 文件 | 行 | 当前消息 | 修复后消息 |
+|---|---|---|---|
+| `test_agent_service_streaming.py` | 192 | `"Loop"` | `"Loop the echo tool"` |
+| `test_agent_service_streaming.py` | 224 | `"Crash"` | `"Use the echo tool"` |
+| `test_agent_service_streaming.py` | 270 | `"Hi"` | `"Search for something"` |
+| `test_agent_service_streaming.py` | 301 | `"Bad JSON"` | `"Use echo tool"` |
+| `test_agent_service_streaming.py` | 350 | `"Hi"` | `"Search for something"` |
+| `test_agent_service.py` | 303 | `"Hi"` | `"Search for something"` |
+
+另外 `test_agent_service_streaming.py:354` 检查心跳格式 `": keepalive\n\n"`，但 `make_heartbeat_event()` 已改为 JSON chunk 格式——需要更新断言。
 
 ## 不重构的部分（确认保留）
 
-以下 Epic 1 hotfix 经评估为合理实现，无需重构：
-
 | 组件 | 理由 |
 |---|---|
-| `stream_chat_completion()` tools 参数透传 | 必要修复，实现干净，与非流式路径一致 |
-| tool-loop 诊断日志（iteration/finish_reason/tool args/result） | 良好实践，对维护有持续价值 |
-| `_should_use_tool_loop_for_streaming()` fast path 分流 | 架构合理（普通对话 vs 工具请求分离），逻辑清晰 |
+| `stream_chat_completion()` tools 参数透传 | 必要修复，实现干净 |
+| tool-loop 诊断日志内容 | 良好实践，对维护有持续价值 |
+| `_should_use_tool_loop_for_streaming()` fast path 分流 | 架构合理 |
 | SSE heartbeat JSON chunk 格式 | 兼容性修复，遵循 OpenAI chunk 协议 |
-| `/v1/models` 模型发现端点 | 干净实现，Open WebUI 集成必需 |
-| RAG search tool + `openwebui_default_collection_names` config | 干净新增，非 hotfix |
+| `/v1/models` 模型发现端点 | 干净实现，Open WebUI 必需 |
+| LITELLM_* 全量重命名 | P2，当前不执行 |
 
----
+## 关键文件
 
-## 验收标准
+- `mentor-agent-service/app/config.py` — Step 0 + Step 1
+- `mentor-agent-service/app/services/llm_service.py` — Step 2
+- `mentor-agent-service/app/main.py` — Step 3a
+- `mentor-agent-service/app/services/agent_service.py` — Step 3b + Step 4a
+- `mentor-agent-service/tests/unit/test_agent_service_streaming.py` — Step 4b
+- `mentor-agent-service/tests/unit/test_agent_service.py` — Step 4b
 
-- [ ] 所有中优先级项已处理（实施或标注为 accepted tech debt）
-- [ ] `pytest` 全量通过
-- [ ] 实施指南步骤 4 连接校验通过（subscription + api 双路径）
-- [ ] 无硬编码开发机路径残留
+## 验证
+
+1. `cd mentor-agent-service && python -m pytest tests/ -v` — 全量通过
+2. 宿主机 `docker compose up -d --force-recreate agent-service`，发送工具请求，确认 `docker compose logs` 中出现 `app.services.agent_service - tool-loop(stream)` 日志
+3. curl `/v1/chat/completions` echo 工具调用通过
