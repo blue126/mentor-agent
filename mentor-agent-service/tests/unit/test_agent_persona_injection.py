@@ -70,10 +70,11 @@ class TestPersonaInjectionNonStreaming:
 class TestPersonaInjectionStreaming:
     """Tests for system prompt injection in run_agent_loop_streaming."""
 
+    @patch("app.services.agent_service.litellm")
     @patch("app.services.agent_service.prompt_service")
     @patch("app.services.agent_service.settings")
     @patch("app.services.agent_service.llm_service")
-    async def test_system_prompt_injected_in_streaming(self, mock_llm, mock_settings, mock_prompt):
+    async def test_system_prompt_injected_in_streaming(self, mock_llm, mock_settings, mock_prompt, mock_litellm):
         """(b) System prompt is prepended in streaming path too."""
         from app.services.agent_service import run_agent_loop_streaming
 
@@ -83,22 +84,22 @@ class TestPersonaInjectionStreaming:
 
         mock_prompt.load_system_prompt = AsyncMock(return_value="You are a Socratic mentor.")
 
-        text_resp = _make_text_response("Hello")
-        mock_llm.get_chat_completion_with_tools = AsyncMock(return_value=text_resp)
-
         async def _mock_stream():
             from tests.test_doubles import MockChunk
             yield MockChunk("Hello", finish_reason="stop")
 
         mock_llm.stream_chat_completion = AsyncMock(return_value=_mock_stream())
+        mock_litellm.stream_chunk_builder = MagicMock(
+            return_value=_make_text_response("Hello")
+        )
 
-        messages = [{"role": "user", "content": "Search for something"}]
+        messages = [{"role": "user", "content": "Hi"}]
         events = []
         async for event in run_agent_loop_streaming(messages):
             events.append(event)
 
         # Verify the messages passed to LLM include system prompt at position 0
-        call_args = mock_llm.get_chat_completion_with_tools.call_args
+        call_args = mock_llm.stream_chat_completion.call_args
         sent_messages = call_args.kwargs.get("messages") or call_args[1].get("messages") or call_args[0][0]
         assert sent_messages[0]["role"] == "system"
         assert "Socratic mentor" in sent_messages[0]["content"]

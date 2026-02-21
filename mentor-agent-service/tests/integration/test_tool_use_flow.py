@@ -73,26 +73,26 @@ async def test_streaming_tool_use_flow():
 
     tool_resp = _make_tool_call_response("echo", '{"message": "integration test"}', "toolu_flow1")
     text_resp = _make_text_response("Echo complete")
-    mock_stream = _mock_stream(MockChunk("Echo"), MockChunk(" complete", "stop"))
 
-    # Track calls to handle two-phase: non-streaming tool check, then non-streaming final, then streaming
     call_count = 0
 
     async def _side_effect(**kwargs):
         nonlocal call_count
         call_count += 1
-        if kwargs.get("stream"):
-            return mock_stream
         if call_count == 1:
-            return tool_resp
-        return text_resp
+            return _mock_stream(MockChunk(None))  # tool_call round
+        return _mock_stream(MockChunk("Echo"), MockChunk(" complete", "stop"))
 
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.services.agent_service.litellm") as mock_agent_litellm,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
+        mock_agent_litellm.stream_chunk_builder = MagicMock(
+            side_effect=[tool_resp, text_resp]
+        )
 
         async with ac:
             resp = await ac.post(
@@ -166,19 +166,20 @@ async def test_no_tool_use_backwards_compatible_streaming():
     ac, _ = _build_client()
 
     text_resp = _make_text_response("Just text")
-    mock_stream = _mock_stream(MockChunk("Just"), MockChunk(" text", "stop"))
 
     async def _side_effect(**kwargs):
-        if kwargs.get("stream"):
-            return mock_stream
-        return text_resp
+        return _mock_stream(MockChunk("Just"), MockChunk(" text", "stop"))
 
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.services.agent_service.litellm") as mock_agent_litellm,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
+        mock_agent_litellm.stream_chunk_builder = MagicMock(
+            return_value=text_resp
+        )
 
         async with ac:
             resp = await ac.post(

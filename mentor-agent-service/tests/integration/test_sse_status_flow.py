@@ -76,25 +76,26 @@ async def test_sse_stream_includes_status_events():
 
     tool_resp = _make_tool_call_response("echo", '{"message": "status test"}', "toolu_s1")
     text_resp = _make_text_response("Final answer")
-    mock_stream = _mock_stream(MockChunk("Final"), MockChunk(" answer", "stop"))
 
     call_count = 0
 
     async def _side_effect(**kwargs):
         nonlocal call_count
         call_count += 1
-        if kwargs.get("stream"):
-            return mock_stream
         if call_count == 1:
-            return tool_resp
-        return text_resp
+            return _mock_stream(MockChunk(None))  # tool_call round
+        return _mock_stream(MockChunk("Final"), MockChunk(" answer", "stop"))
 
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.services.agent_service.litellm") as mock_agent_litellm,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
+        mock_agent_litellm.stream_chunk_builder = MagicMock(
+            side_effect=[tool_resp, text_resp]
+        )
 
         async with ac:
             resp = await ac.post(
@@ -146,19 +147,20 @@ async def test_sse_no_tool_call_no_status_events():
     ac, _ = _build_client()
 
     text_resp = _make_text_response("Just text")
-    mock_stream = _mock_stream(MockChunk("Just"), MockChunk(" text", "stop"))
 
     async def _side_effect(**kwargs):
-        if kwargs.get("stream"):
-            return mock_stream
-        return text_resp
+        return _mock_stream(MockChunk("Just"), MockChunk(" text", "stop"))
 
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.services.agent_service.litellm") as mock_agent_litellm,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
+        mock_agent_litellm.stream_chunk_builder = MagicMock(
+            return_value=text_resp
+        )
 
         async with ac:
             resp = await ac.post(
@@ -233,27 +235,26 @@ async def test_multi_tool_call_status_per_round():
     tool_resp1 = _make_tool_call_response("echo", '{"message": "first"}', "toolu_m1")
     tool_resp2 = _make_tool_call_response("echo", '{"message": "second"}', "toolu_m2")
     text_resp = _make_text_response("Both done")
-    mock_stream = _mock_stream(MockChunk("Both done", "stop"))
 
     call_count = 0
 
     async def _side_effect(**kwargs):
         nonlocal call_count
         call_count += 1
-        if kwargs.get("stream"):
-            return mock_stream
-        if call_count == 1:
-            return tool_resp1
-        if call_count == 2:
-            return tool_resp2
-        return text_resp
+        if call_count <= 2:
+            return _mock_stream(MockChunk(None))  # tool_call rounds
+        return _mock_stream(MockChunk("Both done", "stop"))
 
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.services.agent_service.litellm") as mock_agent_litellm,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
+        mock_agent_litellm.stream_chunk_builder = MagicMock(
+            side_effect=[tool_resp1, tool_resp2, text_resp]
+        )
 
         async with ac:
             resp = await ac.post(
@@ -289,35 +290,32 @@ async def test_sse_stream_includes_heartbeat_when_execution_is_slow():
 
     tool_resp = _make_tool_call_response("echo", '{"message": "slow"}', "toolu_hb1")
     text_resp = _make_text_response("Slow done")
-    mock_stream = _mock_stream(MockChunk("Slow"), MockChunk(" done", "stop"))
 
-    non_stream_call_count = 0
+    call_count = 0
 
     async def _side_effect(**kwargs):
-        nonlocal non_stream_call_count
-        if kwargs.get("stream"):
-            # Simulate slow upstream streaming connection setup.
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # Slow first streaming call — heartbeat should fire during this
             await asyncio.sleep(0.1)
-            return mock_stream
-
-        non_stream_call_count += 1
-        if non_stream_call_count == 1:
-            return tool_resp
-
-        # Simulate slow final non-streaming decision call.
-        await asyncio.sleep(0.1)
-        return text_resp
+            return _mock_stream(MockChunk(None))  # tool_call round
+        return _mock_stream(MockChunk("Slow"), MockChunk(" done", "stop"))
 
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.agent_service.settings") as mock_agent_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.services.agent_service.litellm") as mock_agent_litellm,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_agent_settings.max_tool_iterations = 10
         mock_agent_settings.sse_heartbeat_interval = 0.02
         mock_agent_settings.litellm_model = "test-model"
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
+        mock_agent_litellm.stream_chunk_builder = MagicMock(
+            side_effect=[tool_resp, text_resp]
+        )
 
         async with ac:
             resp = await ac.post(

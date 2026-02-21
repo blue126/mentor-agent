@@ -225,24 +225,25 @@ class TestRunAgentLoop:
 class TestRunAgentLoopStreaming:
     """Tests for run_agent_loop_streaming (SSE async generator)."""
 
+    @patch("app.services.agent_service.litellm")
     @patch("app.services.agent_service.settings")
     @patch("app.services.agent_service.llm_service")
-    async def test_no_tool_use_streams_directly(self, mock_llm, mock_settings):
+    async def test_no_tool_use_streams_directly(self, mock_llm, mock_settings, mock_litellm):
         """No tool_calls → yields content deltas as SSE events."""
         from app.services.agent_service import run_agent_loop_streaming
+        from tests.test_doubles import MockChunk
 
         mock_settings.max_tool_iterations = 10
         mock_settings.sse_heartbeat_interval = 60
         mock_settings.litellm_model = "test-model"
 
-        text_resp = _make_text_response("Hello")
-        mock_llm.get_chat_completion_with_tools = AsyncMock(return_value=text_resp)
-
         async def _mock_stream():
-            from tests.test_doubles import MockChunk
             yield MockChunk("Hello", finish_reason="stop")
 
         mock_llm.stream_chat_completion = AsyncMock(return_value=_mock_stream())
+        mock_litellm.stream_chunk_builder = MagicMock(
+            return_value=_make_text_response("Hello")
+        )
 
         messages = [{"role": "user", "content": "Hi"}]
         events = []
@@ -252,12 +253,14 @@ class TestRunAgentLoopStreaming:
         assert any("data: [DONE]" in e for e in events)
         mock_llm.stream_chat_completion.assert_called_once()
 
+    @patch("app.services.agent_service.litellm")
     @patch("app.services.agent_service.registry")
     @patch("app.services.agent_service.settings")
     @patch("app.services.agent_service.llm_service")
-    async def test_tool_use_then_stream(self, mock_llm, mock_settings, mock_registry):
+    async def test_tool_use_then_stream(self, mock_llm, mock_settings, mock_registry, mock_litellm):
         """Tool call → tool result → final text streamed as SSE events."""
         from app.services.agent_service import run_agent_loop_streaming
+        from tests.test_doubles import MockChunk
 
         mock_settings.max_tool_iterations = 10
         mock_settings.sse_heartbeat_interval = 60
@@ -266,13 +269,18 @@ class TestRunAgentLoopStreaming:
         tool_resp = _make_tool_call_response("echo", '{"message": "hi"}', "toolu_s1")
         text_resp = _make_text_response("Done streaming")
 
-        mock_llm.get_chat_completion_with_tools = AsyncMock(side_effect=[tool_resp, text_resp])
+        async def _tool_stream():
+            yield MockChunk(None)
 
-        async def _mock_stream():
-            from tests.test_doubles import MockChunk
+        async def _text_stream():
             yield MockChunk("Done", finish_reason="stop")
 
-        mock_llm.stream_chat_completion = AsyncMock(return_value=_mock_stream())
+        mock_llm.stream_chat_completion = AsyncMock(
+            side_effect=[_tool_stream(), _text_stream()]
+        )
+        mock_litellm.stream_chunk_builder = MagicMock(
+            side_effect=[tool_resp, text_resp]
+        )
 
         mock_echo = AsyncMock(return_value="hi")
         mock_registry.get_tool.return_value = mock_echo
@@ -285,8 +293,7 @@ class TestRunAgentLoopStreaming:
             events.append(event)
 
         assert any("data: [DONE]" in e for e in events)
-        assert mock_llm.get_chat_completion_with_tools.call_count == 2
-        mock_llm.stream_chat_completion.assert_called_once()
+        assert mock_llm.stream_chat_completion.call_count == 2
 
     @patch("app.services.agent_service.settings")
     @patch("app.services.agent_service.llm_service")
@@ -298,9 +305,11 @@ class TestRunAgentLoopStreaming:
         mock_settings.sse_heartbeat_interval = 60
         mock_settings.litellm_model = "test-model"
 
-        mock_llm.get_chat_completion_with_tools = AsyncMock(return_value="Error: connection refused")
+        mock_llm.stream_chat_completion = AsyncMock(
+            return_value="Error: connection refused"
+        )
 
-        messages = [{"role": "user", "content": "Search for something"}]
+        messages = [{"role": "user", "content": "Hi"}]
         events = []
         async for event in run_agent_loop_streaming(messages):
             events.append(event)

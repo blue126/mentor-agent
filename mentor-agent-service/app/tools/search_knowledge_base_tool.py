@@ -10,7 +10,7 @@ def _handle_openwebui_error(exc: Exception, func_name: str) -> str:
     if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
         return (
             f"Error: Open WebUI is unreachable at {settings.openwebui_base_url}. "
-            "Knowledge base search unavailable. "
+            "Knowledge base service unavailable. "
             "Hint: Answer based on your general knowledge and inform the user that RAG retrieval failed."
         )
     if isinstance(exc, httpx.HTTPStatusError):

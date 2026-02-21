@@ -60,21 +60,17 @@ async def test_agent_loop_rag_tool_use():
     tool_resp = _make_tool_call_response("search_knowledge_base", tool_args, "toolu_rag1")
     text_resp = _make_text_response("Based on your documents, machine learning is...")
 
-    mock_stream = _mock_stream(
-        MockChunk("Based on your documents"),
-        MockChunk(", machine learning is...", "stop"),
-    )
-
     call_count = 0
 
     async def _llm_side_effect(**kwargs):
         nonlocal call_count
         call_count += 1
-        if kwargs.get("stream"):
-            return mock_stream
         if call_count == 1:
-            return tool_resp
-        return text_resp
+            return _mock_stream(MockChunk(None))  # tool_call round
+        return _mock_stream(
+            MockChunk("Based on your documents"),
+            MockChunk(", machine learning is...", "stop"),
+        )
 
     # Mock Open WebUI API response
     rag_response_data = {
@@ -99,10 +95,14 @@ async def test_agent_loop_rag_tool_use():
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.services.agent_service.litellm") as mock_agent_litellm,
         patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_httpx_client),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_llm_side_effect)
+        mock_agent_litellm.stream_chunk_builder = MagicMock(
+            side_effect=[tool_resp, text_resp]
+        )
 
         async with ac:
             resp = await ac.post(

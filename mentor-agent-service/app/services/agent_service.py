@@ -11,6 +11,8 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
+import litellm
+
 from app.config import settings
 from app.services import llm_service, prompt_service
 from app.tools import registry
@@ -22,42 +24,6 @@ from app.utils.sse_generator import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# Maintenance contract: when adding/removing tools in registry, update this set
-# and ensure streaming tests use messages containing at least one keyword.
-_TOOL_INTENT_KEYWORDS = {
-    "tool",
-    "tools",
-    "echo",
-    "knowledge",
-    "knowledge base",
-    "search",
-    "rag",
-    "notion",
-    "anki",
-    "quiz",
-    "practice",
-    "graph",
-    "progress",
-    "工具",
-    "知识库",
-    "检索",
-    "搜索",
-    "题",
-    "练习",
-    "进度",
-    "图谱",
-}
-
-
-def _should_use_tool_loop_for_streaming(messages: list[dict[str, Any]]) -> bool:
-    """Heuristic gate: only enter tool loop when latest user turn hints tool usage."""
-    for message in reversed(messages):
-        if message.get("role") == "user":
-            content = str(message.get("content", "")).lower()
-            return any(keyword in content for keyword in _TOOL_INTENT_KEYWORDS)
-    return False
 
 
 async def _inject_system_prompt(messages: list[dict[str, Any]]) -> None:
@@ -179,47 +145,50 @@ async def run_agent_loop_streaming(
 
     async def _agent_loop() -> None:
         try:
-            # Fast path: avoid non-streaming tool planning for normal chat turns.
-            if not _should_use_tool_loop_for_streaming(messages):
+            tools = registry.get_all_schemas()
+            iteration = 0
+
+            while iteration < settings.max_tool_iterations:
+                logger.info("tool-loop(stream) iteration=%s", iteration + 1)
+
+                # Always stream with tools — let LLM decide whether to use them
                 stream_result = await llm_service.stream_chat_completion(
                     messages=messages,
                     model=model,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    tools=tools,
+                    tool_choice="auto",
                 )
                 if isinstance(stream_result, str):
                     await queue.put(make_status_event(f"⚠️ {stream_result}", resolved_model))
-                else:
-                    async for chunk in stream_result:
-                        chunk_dict = chunk.model_dump(exclude_none=True)
-                        await queue.put(f"data: {json.dumps(chunk_dict)}\n\n")
-                await queue.put(make_done_event())
-                return
-
-            tools = registry.get_all_schemas()
-            iteration = 0
-            while iteration < settings.max_tool_iterations:
-                logger.info("tool-loop(stream) iteration=%s", iteration + 1)
-                result = await llm_service.get_chat_completion_with_tools(
-                    messages=messages,
-                    tools=tools,
-                    tool_choice="auto",
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
-
-                # Fail Soft: LLM error
-                if isinstance(result, str):
-                    await queue.put(make_status_event(f"⚠️ {result}", resolved_model))
                     break
 
-                # Fail Soft: empty choices
-                if not getattr(result, "choices", None):
+                # Accumulate chunks; forward text content deltas in real-time
+                chunks: list[Any] = []
+                content_forwarded = False
+                async for chunk in stream_result:
+                    chunks.append(chunk)
+                    chunk_dict = chunk.model_dump(exclude_none=True)
+                    choices = chunk_dict.get("choices", [])
+                    if choices and choices[0].get("delta", {}).get("content"):
+                        await queue.put(f"data: {json.dumps(chunk_dict)}\n\n")
+                        content_forwarded = True
+
+                # Rebuild complete response to inspect finish_reason / tool_calls
+                try:
+                    rebuilt = litellm.stream_chunk_builder(chunks, messages=messages)
+                except Exception as exc:
+                    logger.exception("stream_chunk_builder failed: %s", exc)
+                    if not content_forwarded:
+                        await queue.put(make_status_event(f"⚠️ Error: {exc}", resolved_model))
+                    break
+
+                if not getattr(rebuilt, "choices", None):
                     await queue.put(make_status_event("⚠️ Error: LLM returned empty choices", resolved_model))
                     break
 
-                choice = result.choices[0]
+                choice = rebuilt.choices[0]
                 finish_reason = choice.finish_reason
                 logger.info("tool-loop(stream) finish_reason=%s", finish_reason)
 
@@ -250,22 +219,7 @@ async def run_agent_loop_streaming(
                     iteration += 1
                     continue
 
-                # Final answer — stream to client
-                stream_result = await llm_service.stream_chat_completion(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    tools=tools,
-                    tool_choice="auto",
-                )
-                if isinstance(stream_result, str):
-                    await queue.put(make_status_event(f"⚠️ {stream_result}", resolved_model))
-                    break
-
-                async for chunk in stream_result:
-                    chunk_dict = chunk.model_dump(exclude_none=True)
-                    await queue.put(f"data: {json.dumps(chunk_dict)}\n\n")
+                # finish_reason == "stop" — text chunks already forwarded above
                 break
             else:
                 # Max iterations reached

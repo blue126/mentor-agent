@@ -5,7 +5,7 @@ key persona directives, for both stream=false and stream=true paths.
 """
 
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import ASGITransport, AsyncClient
 
@@ -109,16 +109,20 @@ async def test_streaming_includes_persona_directives():
     """Streaming: LLM receives system prompt with all required persona directives."""
     ac, app = _build_client()
 
-    non_stream_resp = _make_text_response("Hello world")
-    mock_stream = _mock_stream_response(MockChunk("Hello"), MockChunk(" world", "stop"))
+    text_resp = _make_text_response("Hello world")
+
+    async def _side_effect(**kwargs):
+        return _mock_stream_response(MockChunk("Hello"), MockChunk(" world", "stop"))
 
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.services.agent_service.litellm") as mock_agent_litellm,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
-        mock_litellm.acompletion = AsyncMock(
-            side_effect=_make_stream_aware_mock(non_stream_resp, mock_stream),
+        mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
+        mock_agent_litellm.stream_chunk_builder = MagicMock(
+            return_value=text_resp
         )
 
         async with ac:
