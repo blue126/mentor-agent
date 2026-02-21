@@ -8,4 +8,5 @@ This folder organizes testing documentation by intent.
 Current files:
 
 - Plan: `docs/testing/plans/testing-plan-epic1.md`
+- Plan: `docs/testing/plans/testing-plan-epic2.md`
 - Report: `docs/testing/reports/testing-report-epic1.md`
