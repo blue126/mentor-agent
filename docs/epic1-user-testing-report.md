@@ -242,13 +242,31 @@
 | T9 | Step 3 复测通过 | Thinking/Running 可见，返回 `hello tool loop` |
 | T10 | subscription 回归（经 `claude-max-proxy`） | 工具边界正确，Step 3 再次通过 |
 | T11 | Step2/Step4 回归 | Step2 通过；Step4 通过但发现 `<system-reminder>` 文本泄露 |
+| T12 | claude-max-proxy 容器化迁移 | Docker 内网链路验证通过（见下文） |
+
+### 迁移验证：claude-max-proxy 容器化（2026-02-21）
+
+- 背景: claude-max-proxy 从宿主机进程迁移到 docker-compose 统一编排。
+- 链路: Open WebUI → agent-service → claude-max-proxy（Docker 内网 `http://claude-max-proxy:3456/v1`）
+- 验证结果:
+  - `/health` 返回 `{"status":"ok","version":"3.4.0"}`
+  - `LITELLM_BASE_URL` 确认为 `http://claude-max-proxy:3456/v1`（非 `host.docker.internal`）
+  - API 级：`curl /v1/chat/completions` 返回 `echo / search_knowledge_base / list_knowledge_bases`
+  - GUI 级：Open WebUI echo 工具端到端通过
+- 排查记录:
+  - 问题 1: claude-max-proxy 默认绑定 `127.0.0.1`，容器间不可达 → 添加 `HOST=0.0.0.0` 环境变量
+  - 问题 2: 旧容器名冲突 → `docker rm -f` 旧容器后重建
+- 结论: 基线链路从 `host.docker.internal:3456` 迁移到 Docker 内网 `claude-max-proxy:3456` 完成。
 
 ## 6. 当前状态与下一步
 
 - 当前状态:
   - Epic 1 的 Step 1/2/3/4/5 已通过。
   - Tool Loop 核心链路已跑通并有日志证据。
+  - claude-max-proxy 已容器化，基线链路使用 Docker 内网。
+  - `litellm-claude-code` 降级为 `profiles: [fallback]`，不默认启动。
   - 存在一项非阻塞风险：偶发 `<system-reminder>` 文本泄露到用户可见回复。
 - 下一步建议:
+  - 执行代码重构计划（`docs/code-refactoring-plan.md`），清理 Epic 1 hotfix。
   - 增加输出清洗（过滤 `<system-reminder>` 片段）并回归验证。
   - 回到性能专项：在 Step 3 稳定前提下重新测 TTFB，并记录基线与优化后数据。

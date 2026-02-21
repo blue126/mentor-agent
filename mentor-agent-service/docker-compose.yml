@@ -15,7 +15,7 @@ services:
       - path: .env
         required: false
     depends_on:
-      - litellm-claude-code
+      - claude-max-proxy
     restart: unless-stopped
 
   open-webui:
@@ -27,13 +27,29 @@ services:
       - open-webui-data:/app/backend/data
     restart: unless-stopped
 
+  # [Baseline] subscription profile 上游代理
+  # agent-service 通过 http://claude-max-proxy:3456/v1 访问
+  claude-max-proxy:
+    container_name: claude-max-proxy
+    build: ../claude-max-proxy
+    ports:
+      - "3456:3456"
+    volumes:
+      - ${CLAUDE_TOKENS_PATH:?请在 .env 中设置 CLAUDE_TOKENS_PATH（如 ~/.claude-max-proxy.json）}:/root/.claude-max-proxy.json
+    environment:
+      - HOST=0.0.0.0
+    restart: unless-stopped
+
+  # [Non-baseline] Claude subscription CLI wrapper — 工具调用受限，仅作可选路径
+  # 需手动启动: docker compose --profile fallback up litellm-claude-code
   litellm-claude-code:
     container_name: litellm-claude-code
     image: ghcr.io/cabinlab/litellm-claude-code:latest
+    profiles: [fallback]
     ports:
       - "4000:4000"
     volumes:
-      - ${CLAUDE_AUTH_PATH:-/Users/weierfu/.claude}:/home/claude/.claude
+      - ${CLAUDE_AUTH_PATH:?请在 .env 中设置 CLAUDE_AUTH_PATH（如 ~/.claude）}:/home/claude/.claude
     environment:
       - CLAUDE_TOKEN=${CLAUDE_TOKEN}
       - LITELLM_MASTER_KEY=${LITELLM_KEY}
@@ -42,8 +58,7 @@ services:
   # In Open WebUI, configure Connections -> OpenAI-compatible API:
   # Base URL: http://agent-service:8100/v1
   # API Key:  AGENT_API_KEY
-  # litellm-claude-code runs in this compose network.
-  # agent-service reaches it via: http://litellm-claude-code:4000/v1
+  # 基线链路: Open WebUI -> agent-service -> claude-max-proxy (subscription profile)
   # anki: (Epic 5)
 
 volumes:
