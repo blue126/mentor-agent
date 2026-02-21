@@ -267,6 +267,6 @@
   - `litellm-claude-code` 降级为 `profiles: [fallback]`，不默认启动。
   - 存在一项非阻塞风险：偶发 `<system-reminder>` 文本泄露到用户可见回复。
 - 下一步建议:
-  - 执行代码重构计划（`docs/code-refactoring-plan.md`），清理 Epic 1 hotfix。
+  - 执行代码重构计划（`docs/epic1-refactor/code-refactoring-plan.md`），清理 Epic 1 hotfix。
   - 增加输出清洗（过滤 `<system-reminder>` 片段）并回归验证。
   - 回到性能专项：在 Step 3 稳定前提下重新测 TTFB，并记录基线与优化后数据。

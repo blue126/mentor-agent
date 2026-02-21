@@ -39,7 +39,7 @@
 
 ```
 请读取以下两个文件，生成本项目的 AI subagent 集成方案：
-1. AI 开发环境配置指南：docs/ai-dev-environment-setup-guide.md
+1. AI 开发环境配置指南：docs/admin/ai-dev-environment-setup-guide.md
 2. 项目上下文概览：_bmad-output/project-context.md
 
 基于 project-context.md 中描述的技术栈和架构：
@@ -62,7 +62,7 @@
 
 ```
 请读取以下文件，生成本项目的 AI subagent 集成方案：
-1. AI 开发环境配置指南：docs/ai-dev-environment-setup-guide.md
+1. AI 开发环境配置指南：docs/admin/ai-dev-environment-setup-guide.md
 2. 架构文档：_bmad-output/architecture.md
 3. 项目简报：_bmad-output/project-brief.md
 
