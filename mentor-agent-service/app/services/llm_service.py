@@ -104,15 +104,21 @@ async def get_chat_completion(
     model: str | None = None,
     temperature: float | None = None,
     max_tokens: int | None = None,
-) -> Any | str:
-    """Get a non-streaming chat completion. Returns response object or error string on failure."""
-    return await _run_completion(
+) -> str:
+    """Get a non-streaming chat completion. Returns text content or error string on failure."""
+    result = await _run_completion(
         messages=messages,
         stream=False,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    if isinstance(result, str):
+        return result
+    try:
+        return result.choices[0].message.content or ""
+    except (AttributeError, IndexError, TypeError):
+        return "Error: LLM returned unexpected response format"
 
 
 async def get_chat_completion_with_tools(

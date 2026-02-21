@@ -31,8 +31,8 @@ async def test_stream_chat_completion_returns_async_generator(mock_litellm):
 
 
 @patch("app.services.llm_service.litellm")
-async def test_get_chat_completion_returns_response(mock_litellm):
-    """get_chat_completion should return a non-streaming response."""
+async def test_get_chat_completion_returns_text_content(mock_litellm):
+    """get_chat_completion should extract and return text content string."""
     msg = type("Msg", (), {"role": "assistant", "content": "Hello!"})()
     choice = type("Choice", (), {"message": msg, "finish_reason": "stop"})()
     usage = type("Usage", (), {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8})()
@@ -44,8 +44,8 @@ async def test_get_chat_completion_returns_response(mock_litellm):
     mock_litellm.acompletion = AsyncMock(return_value=mock_response)
 
     result = await get_chat_completion(_MESSAGES, "test-model")
-    assert result is not None and not isinstance(result, str)
-    assert result.choices[0].message.content == "Hello!"
+    assert isinstance(result, str)
+    assert result == "Hello!"
 
 
 @patch("app.services.llm_service.litellm")
