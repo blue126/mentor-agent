@@ -42,7 +42,11 @@ registry.register(
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query to find relevant content in the knowledge base",
+                    "description": (
+                        "The search query to find relevant content in the knowledge base. "
+                        "IMPORTANT: Always formulate queries in English, even if the user "
+                        "writes in another language, because the embedding model is English-optimized."
+                    ),
                 },
                 "collection_names": {
                     "type": "array",

@@ -16,7 +16,15 @@ def _handle_openwebui_error(exc: Exception, func_name: str) -> str:
     if isinstance(exc, httpx.HTTPStatusError):
         if exc.response.status_code == 401:
             return "Error: Open WebUI API authentication failed. Hint: Check OPENWEBUI_API_KEY configuration."
-        return f"Error: Open WebUI API returned status {exc.response.status_code}. Hint: Check Open WebUI service status."
+        # Include response body for diagnostics (e.g. 422 validation errors)
+        try:
+            detail = exc.response.json()
+        except Exception:
+            detail = exc.response.text[:500]
+        return (
+            f"Error: Open WebUI API returned status {exc.response.status_code}. "
+            f"Detail: {detail}. Hint: Check Open WebUI service status."
+        )
     return f"Error: {func_name} failed: {exc}. Hint: Check Open WebUI connection and try again."
 
 

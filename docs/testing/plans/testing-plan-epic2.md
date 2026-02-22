@@ -14,11 +14,30 @@
 
 ## 2) 环境准备
 
+- 先在项目根目录确认 `mentor-agent-service/.env` 已配置（尤其 `AGENT_API_KEY`、`OPENWEBUI_API_KEY`、`CLAUDE_TOKENS_PATH`）。
 - Open WebUI 正常可用，并已连接 `agent-service`（`/v1` 端点可访问）。
 - 选择可用模型（建议固定 1 个模型做整轮验证）。
 - 上传至少 1 份结构清晰的 PDF（建议带目录与章节，例如教材/技术书）。
 - `mentor-agent-service` 可执行 pytest。
 - 准备 1 份测试记录文档（建议后续写入 `docs/testing/reports/testing-report-epic2.md`）。
+
+### 环境拉起命令（先执行）
+
+```bash
+# 1) 拉起基线服务（subscription profile）
+docker compose -f mentor-agent-service/docker-compose.yml up -d --build claude-max-proxy agent-service open-webui
+
+# 2) 检查容器状态
+docker compose -f mentor-agent-service/docker-compose.yml ps
+
+# 3) 验证 agent-service 可用（模型发现）
+curl -sS http://127.0.0.1:8100/v1/models -H "Authorization: Bearer dev-token"
+```
+
+说明：
+
+- 上述命令默认走基线链路：`Open WebUI -> agent-service -> claude-max-proxy`。
+- 如果你本地 `AGENT_API_KEY` 不是 `dev-token`，请把 curl 中的 token 改成你实际值。
 
 ## 3) 20-30 分钟用户侧验收流程（Open WebUI）
 
@@ -41,7 +60,7 @@
 
 - 输入：`请根据我上传的资料生成学习计划，按 chapter/sections 结构输出。`
 - 通过标准：
-  - 返回结构化结果（JSON 或等价结构）；
+  - 返回格式化的学习计划文本，包含 Topic 和 Concept 层级结构；
   - 至少包含 chapter + sections 层级；
   - 结构可读且与文档目录语义大致一致。
 
@@ -54,7 +73,8 @@
 
 ### Step 5: 关系抽取（2.4）
 
-- 期望行为（产品侧）：学习计划生成后自动触发关系抽取（无需用户二次发起）。
+- 期望行为（理想产品体验）：学习计划生成后自动触发关系抽取（无需用户二次发起）。
+- 验收口径（当前版本）：自动触发与兜底手动触发二者满足其一即可通过（见通过标准）。
 - 人工验证方式（测试侧）：
   - 先在聊天界面等待 5-15 秒，不输入新消息，观察是否自动出现“关系抽取结果”文本（例如含 `prerequisite` / `related` 或“前置/关联关系”）；
   - 若界面支持状态流，观察是否自动出现类似 `Running extract_concept_relationships...` 的提示（可选，不作为必须条件）；
@@ -64,6 +84,14 @@
   - 返回关系结果，至少出现两类关系中的一种；
   - 若返回两类关系更佳；
   - 关系描述与领域常识不明显冲突。
+
+### Step 5.5: 关系抽取幂等性（2.4 AC#7）
+
+- 输入：`请再次对当前学习计划抽取概念关系。`
+- 通过标准：
+  - 返回结果中出现 `Skipped (existing): N`（N > 0），表示已有边被跳过；
+  - 不产生重复边；
+  - 服务不报错。
 
 ### Step 6: 关系可用性验证（2.4 -> 3.x 输入）
 
@@ -106,7 +134,21 @@
 ### Step 8: Epic 2 相关测试集
 
 - 在 `mentor-agent-service` 目录运行：
-  - `python -m pytest tests/unit/test_graph_repo.py tests/unit/test_graph_service.py tests/integration/test_graph_integration.py tests/integration/test_migration.py -q`
+  ```bash
+  python -m pytest \
+    tests/unit/test_search_knowledge_base.py \
+    tests/unit/test_list_knowledge_bases.py \
+    tests/unit/test_graph_repo.py \
+    tests/unit/test_graph_service.py \
+    tests/unit/test_learning_plan_tool.py \
+    tests/unit/test_extract_relationships_tool.py \
+    tests/integration/test_graph_integration.py \
+    tests/integration/test_migration.py \
+    tests/integration/test_learning_plan_integration.py \
+    tests/integration/test_extract_relationships_integration.py \
+    tests/integration/test_rag_tool_integration.py \
+    -q
+  ```
 - 通过标准：全部通过。
 
 ### Step 9: 全量回归
@@ -120,6 +162,11 @@
   - 表存在：`topics`, `concepts`, `concept_edges`
   - 字段存在：`created_at`、关系字段、topic/concept 主外键
 - 通过标准：结构与 Story 2.2 设计一致。
+- 参考命令（示例）：
+  ```bash
+  sqlite3 mentor-agent-service/data/mentor.db \
+    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('topics','concepts','concept_edges');"
+  ```
 
 ### Step 11: 计划与关系数据抽检（2.3/2.4）
 
@@ -127,6 +174,11 @@
   - 计划生成后有对应 topic/concept 数据（非仅对话文本）
   - 关系抽取后 `concept_edges` 有新增记录
 - 通过标准：对话结果与 DB 状态一致（可追溯）。
+- 参考命令（示例）：
+  ```bash
+  sqlite3 mentor-agent-service/data/mentor.db \
+    "SELECT COUNT(*) AS topic_count FROM topics; SELECT COUNT(*) AS concept_count FROM concepts; SELECT COUNT(*) AS edge_count FROM concept_edges;"
+  ```
 
 ## 5) 结果记录模板
 
@@ -137,6 +189,7 @@
 | Step 3 | 通过/失败 | 输出结构截图/文本 | |
 | Step 4 | 通过/失败 | 对话截图/文本 | |
 | Step 5 | 通过/失败 | 关系输出截图/文本 | |
+| Step 5.5 | 通过/失败 | 幂等结果截图/文本 | |
 | Step 6 | 通过/失败 | 对话截图/文本 | |
 | Step 7(建议) | 通过/失败 | 降级提示截图/文本 | |
 | Step 8 | 通过/失败 | pytest 输出 | |
@@ -146,7 +199,7 @@
 
 ## 6) Epic 2 完成判定
 
-- 必须通过：Step 1~6、Step 8~11
+- 必须通过：Step 1~6（含 5.5）、Step 8~11
 - 建议通过：Step 7（Fail Soft）
 - 判定规则：
   - 必须步骤全部通过 => Epic 2 可判定为完工并进入 Epic 3 主开发

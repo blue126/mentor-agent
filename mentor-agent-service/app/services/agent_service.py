@@ -164,23 +164,29 @@ async def run_agent_loop_streaming(
                     await queue.put(make_status_event(f"⚠️ {stream_result}", resolved_model))
                     break
 
-                # Accumulate chunks; forward text content deltas in real-time
+                # Buffer content chunks — only flush on finish_reason="stop".
+                # This prevents "double-response" when LLM mixes content +
+                # tool_calls: content is discarded, tools execute, and only
+                # the final answer (after all tools complete) reaches the client.
                 chunks: list[Any] = []
-                content_forwarded = False
+                buffered_content: list[str] = []
                 async for chunk in stream_result:
                     chunks.append(chunk)
                     chunk_dict = chunk.model_dump(exclude_none=True)
                     choices = chunk_dict.get("choices", [])
                     if choices and choices[0].get("delta", {}).get("content"):
-                        await queue.put(f"data: {json.dumps(chunk_dict)}\n\n")
-                        content_forwarded = True
+                        buffered_content.append(f"data: {json.dumps(chunk_dict)}\n\n")
 
                 # Rebuild complete response to inspect finish_reason / tool_calls
                 try:
                     rebuilt = litellm.stream_chunk_builder(chunks, messages=messages)
                 except Exception as exc:
                     logger.exception("stream_chunk_builder failed: %s", exc)
-                    if not content_forwarded:
+                    if buffered_content:
+                        # Flush what we have — it's the best response available.
+                        for event in buffered_content:
+                            await queue.put(event)
+                    else:
                         await queue.put(make_status_event(f"⚠️ Error: {exc}", resolved_model))
                     break
 
@@ -193,6 +199,15 @@ async def run_agent_loop_streaming(
                 logger.info("tool-loop(stream) finish_reason=%s", finish_reason)
 
                 if finish_reason == "tool_calls" and getattr(choice.message, "tool_calls", None):
+                    # Discard any buffered content — LLM mixed text + tool_calls.
+                    if buffered_content:
+                        logger.info(
+                            "tool-loop(stream) discarding %d buffered content "
+                            "chunks (finish_reason=tool_calls, iteration=%s)",
+                            len(buffered_content),
+                            iteration + 1,
+                        )
+
                     await queue.put(make_status_event("💭 Thinking...", resolved_model))
                     messages.append(choice.message.model_dump())
 
@@ -219,7 +234,9 @@ async def run_agent_loop_streaming(
                     iteration += 1
                     continue
 
-                # finish_reason == "stop" — text chunks already forwarded above
+                # finish_reason == "stop" — flush buffered content to client.
+                for event in buffered_content:
+                    await queue.put(event)
                 break
             else:
                 # Max iterations reached

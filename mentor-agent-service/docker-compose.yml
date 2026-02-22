@@ -29,13 +29,14 @@ services:
 
   # [Baseline] subscription profile 上游代理
   # agent-service 通过 http://claude-max-proxy:3456/v1 访问
+  # 只读挂载宿主机 CLI credential（host CLI 负责 token refresh，proxy 只读取）
   claude-max-proxy:
     container_name: claude-max-proxy
     build: ../claude-max-proxy
     ports:
       - "3456:3456"
     volumes:
-      - ${CLAUDE_TOKENS_PATH:?请在 .env 中设置 CLAUDE_TOKENS_PATH（如 ~/.claude-max-proxy.json）}:/root/.claude-max-proxy.json
+      - ${CLAUDE_CREDENTIALS_DIR:?请在 .env 中设置 CLAUDE_CREDENTIALS_DIR（如 ~/.claude）}:/root/.claude:ro
     environment:
       - HOST=0.0.0.0
     restart: unless-stopped

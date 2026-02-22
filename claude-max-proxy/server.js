@@ -48,7 +48,9 @@ const AVAILABLE_MODELS = [
   { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
 ];
 
-const CONFIG_FILE = join(homedir(), '.claude-max-proxy.json');
+// Read from mounted directory (not a single file) to survive atomic renames by host CLI.
+// Mount: host ~/.claude/ → container /root/.claude/ (read-only)
+const CONFIG_FILE = process.env.CLAUDE_CREDENTIALS_FILE || join(homedir(), '.claude', '.credentials.json');
 
 let cachedTokens = null;
 let tokenExpiry = 0;
@@ -63,7 +65,10 @@ function loadTokensFromFile() {
   try {
     if (existsSync(CONFIG_FILE)) {
       const data = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
+      // Flat format (legacy exported tokens)
       if (data.accessToken) return data;
+      // Nested format (Claude Code CLI ~/.claude/.credentials.json)
+      if (data.claudeAiOauth?.accessToken) return data.claudeAiOauth;
     }
   } catch (e) {}
   return null;
@@ -83,11 +88,17 @@ function saveTokensToFile(tokens) {
 
 async function getOAuthTokens() {
   if (cachedTokens && Date.now() < tokenExpiry - 300000) return cachedTokens;
+  // Read-only mode: always reload from file/env (host CLI manages refresh)
   let oauth = loadTokensFromEnv() || loadTokensFromFile() || loadTokensFromKeychain();
-  if (!oauth?.accessToken) throw new Error('No OAuth tokens found.');
-  if (oauth.expiresAt && Date.now() >= oauth.expiresAt - 300000 && oauth.refreshToken) {
-    const refreshed = await doRefreshToken(oauth.refreshToken);
-    if (refreshed) { saveTokensToFile(refreshed); cachedTokens = refreshed; tokenExpiry = refreshed.expiresAt; return refreshed; }
+  if (!oauth?.accessToken) throw new Error('No OAuth tokens found. Ensure host CLI is authenticated: run "claude auth status" on the host.');
+  // Token health check with actionable hints
+  const now = Date.now();
+  if (oauth.expiresAt && now >= oauth.expiresAt) {
+    const expiredAgo = ((now - oauth.expiresAt) / 3600000).toFixed(1);
+    console.error(`[TOKEN EXPIRED] Access token expired ${expiredAgo}h ago. Fix: run "claude" in the host terminal to refresh the token, then re-send your request (no proxy restart needed).`);
+  } else if (oauth.expiresAt && oauth.expiresAt - now < 1800000) {
+    const minsLeft = ((oauth.expiresAt - now) / 60000).toFixed(0);
+    console.warn(`[TOKEN WARNING] Access token expires in ${minsLeft} min. Run "claude" in the host terminal to refresh.`);
   }
   cachedTokens = oauth;
   tokenExpiry = oauth.expiresAt || Date.now() + 3600000;
@@ -444,7 +455,17 @@ async function handleRequest(req, res) {
 const server = createServer(handleRequest);
 server.listen(PORT, HOST, async () => {
   let status = 'checking...';
-  try { await getOAuthTokens(); status = 'valid'; } catch (e) { status = e.message; }
+  try {
+    const tokens = await getOAuthTokens();
+    if (tokens.expiresAt && Date.now() >= tokens.expiresAt) {
+      status = 'EXPIRED — fix: run "claude" in host terminal';
+    } else if (tokens.expiresAt) {
+      const hoursLeft = ((tokens.expiresAt - Date.now()) / 3600000).toFixed(1);
+      status = `valid (${hoursLeft}h remaining)`;
+    } else {
+      status = 'valid (no expiry info)';
+    }
+  } catch (e) { status = e.message; }
   console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║     Claude Max Proxy v3.4.0 (XML History Reconstruction)      ║
