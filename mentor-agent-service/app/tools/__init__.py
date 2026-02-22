@@ -45,23 +45,18 @@ registry.register(
                     "description": (
                         "The search query to find relevant content in the knowledge base. "
                         "IMPORTANT: Always formulate queries in English, even if the user "
-                        "writes in another language, because the embedding model is English-optimized."
-                    ),
-                },
-                "collection_names": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Specific knowledge collection IDs to search. Required by upstream API — "
-                        "if omitted, the tool will use OPENWEBUI_DEFAULT_COLLECTION_NAMES from config; "
-                        "if that is also empty, returns an error prompting the LLM to call "
-                        "list_knowledge_bases first."
+                        "writes in another language, because the embedding model is English-optimized. "
+                        "Query strategy: Use specific, descriptive phrases rather than short keywords. "
+                        "For example, instead of 'list comprehension', use "
+                        "'list comprehension syntax and usage in Python chapter 4'. "
+                        "If the first search returns irrelevant results, try rephrasing with "
+                        "more context (e.g., include chapter names, section titles, or synonyms)."
                     ),
                 },
                 "k": {
                     "type": "integer",
-                    "description": "Number of top results to return",
-                    "default": 4,
+                    "description": "Number of top results to return (default: 8)",
+                    "default": 8,
                 },
             },
             "required": ["query"],
@@ -109,14 +104,6 @@ registry.register(
                     "description": (
                         "Optional custom search query to find the document's table of contents. "
                         "If not provided, a default query targeting the TOC will be used."
-                    ),
-                },
-                "collection_names": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "Optional specific knowledge collection IDs to search. "
-                        "If omitted, uses the default collection."
                     ),
                 },
             },

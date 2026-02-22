@@ -189,7 +189,7 @@ def _format_plan_from_db(source_name: str, concepts: list[dict]) -> str:
 async def generate_learning_plan(
     source_name: str,
     query: str | None = None,
-    collection_names: list[str] | None = None,
+    collection_name: str | list[str] | None = None,
 ) -> str:
     """Generate a structured learning plan from an uploaded document.
 
@@ -233,7 +233,7 @@ async def generate_learning_plan(
         search_query = query or f"table of contents overview introduction chapters {source_name}"
         toc_text = await search_knowledge_base(
             query=search_query,
-            collection_names=collection_names,
+            collection_name=collection_name,
             k=8,
         )
 

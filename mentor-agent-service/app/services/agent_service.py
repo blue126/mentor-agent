@@ -51,10 +51,31 @@ async def _execute_tool(fn_name: str, fn_args_raw: str) -> str:
         available = ", ".join(registry.list_tools())
         return f"Error: Unknown tool '{fn_name}'. Available tools: [{available}]"
 
+    # Filter args to schema-defined parameters only (prevent LLM-hallucinated params
+    # from reaching the function and bypassing auto-discover / default logic)
+    tool_schema = registry.get_schema(fn_name)
+    schema_params: set[str] | None = None
+    if isinstance(tool_schema, dict):
+        props = tool_schema.get("parameters", {})
+        if isinstance(props, dict):
+            prop_keys = props.get("properties", {})
+            if isinstance(prop_keys, dict) and prop_keys:
+                schema_params = set(prop_keys.keys())
+    if schema_params is not None:
+        fn_args = {k: v for k, v in fn_args.items() if k in schema_params}
+
     # Execute tool (Fail Soft on exceptions)
     try:
         result = await tool_func(**fn_args)
         return str(result) if not isinstance(result, str) else result
+    except TypeError as exc:
+        # Return schema-defined params (not function signature) to guide LLM self-correction
+        expected = list(schema_params) if schema_params else []
+        return (
+            f"Error: {fn_name} parameter error: {exc}. "
+            f"Expected parameters: {expected}. "
+            f"Hint: Retry with correct parameter names."
+        )
     except Exception as exc:
         return f"Error: {fn_name} failed: {exc}. Hint: Check input parameters and try again."
 
@@ -209,7 +230,13 @@ async def run_agent_loop_streaming(
                         )
 
                     await queue.put(make_status_event("💭 Thinking...", resolved_model))
-                    messages.append(choice.message.model_dump())
+                    # Append assistant message but strip discarded content so the
+                    # next LLM call doesn't see text the user never received.
+                    # This prevents "continuation" responses that reference invisible context.
+                    assistant_msg = choice.message.model_dump()
+                    if buffered_content:
+                        assistant_msg.pop("content", None)
+                    messages.append(assistant_msg)
 
                     for tool_call in choice.message.tool_calls:
                         fn_name = tool_call.function.name

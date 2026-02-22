@@ -63,7 +63,7 @@ async def test_search_normal_return():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test query", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test query", collection_name=["col-1"])
 
     assert "[Source: book.pdf]" in result
     assert "(score: 0.9200)" in result
@@ -91,7 +91,7 @@ async def test_search_no_results():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="unknown topic", collection_names=["col-1"])
+        result = await search_knowledge_base(query="unknown topic", collection_name=["col-1"])
 
     assert "No relevant content found" in result
     assert "unknown topic" in result
@@ -107,7 +107,7 @@ async def test_search_timeout():
     mock_client.post = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     assert "Error:" in result
     assert "unreachable" in result
@@ -126,7 +126,7 @@ async def test_search_401_auth_failure():
     )
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     assert "authentication failed" in result
     assert "OPENWEBUI_API_KEY" in result
@@ -142,7 +142,7 @@ async def test_search_generic_exception():
     mock_client.post = AsyncMock(side_effect=RuntimeError("unexpected"))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     assert "Error: search_knowledge_base failed:" in result
     assert "unexpected" in result
@@ -159,7 +159,7 @@ async def test_search_uses_explicit_collection_names():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        await search_knowledge_base(query="test", collection_names=["explicit-col"])
+        await search_knowledge_base(query="test", collection_name=["explicit-col"])
 
     call_kwargs = mock_client.post.call_args
     assert call_kwargs[1]["json"]["collection_names"] == ["explicit-col"]
@@ -208,7 +208,7 @@ async def test_search_malformed_response_missing_key():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     assert "unexpected response format" in result
 
@@ -224,13 +224,13 @@ async def test_search_malformed_response_empty_outer_list():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     assert "No relevant content found" in result
 
 
-# Test 10: collection_names all empty — error prompting to call list_knowledge_bases
-async def test_search_no_collection_names(monkeypatch):
+# Test 10: collection_names empty — auto-discovers from list_knowledge_bases API
+async def test_search_no_collection_names_auto_discovers(monkeypatch):
     from app.tools.search_knowledge_base_tool import search_knowledge_base
 
     monkeypatch.setattr(
@@ -238,9 +238,25 @@ async def test_search_no_collection_names(monkeypatch):
         _make_settings(default_collections=""),
     )
 
-    result = await search_knowledge_base(query="test")
-    assert "No knowledge base collections specified" in result
-    assert "list_knowledge_bases" in result
+    # Mock auto-discover returning one KB, then search returning results
+    kb_items = [{"id": "abc-123", "name": "Python"}]
+    search_data = {"documents": [["some content"]], "metadatas": [[{"name": "test.pdf"}]], "distances": [[0.8]]}
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    # First call: GET list_knowledge_bases (auto-discover), second call: POST search
+    mock_client.get = AsyncMock(return_value=_ok_response(kb_items))
+    mock_client.post = AsyncMock(return_value=_ok_response(search_data))
+
+    with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
+        result = await search_knowledge_base(query="test")
+
+    assert "some content" in result
+    # Verify search was called with auto-discovered collection ID
+    mock_client.post.assert_called_once()
+    call_kwargs = mock_client.post.call_args
+    assert call_kwargs[1]["json"]["collection_names"] == ["abc-123"]
 
 
 # Test 11: k value clamping
@@ -255,15 +271,15 @@ async def test_search_k_clamp():
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
         # k=0 should clamp to 1
-        await search_knowledge_base(query="test", collection_names=["col-1"], k=0)
+        await search_knowledge_base(query="test", collection_name=["col-1"], k=0)
         assert mock_client.post.call_args[1]["json"]["k"] == 1
 
         # k=50 should clamp to 20
-        await search_knowledge_base(query="test", collection_names=["col-1"], k=50)
+        await search_knowledge_base(query="test", collection_name=["col-1"], k=50)
         assert mock_client.post.call_args[1]["json"]["k"] == 20
 
         # k=4 should remain 4
-        await search_knowledge_base(query="test", collection_names=["col-1"], k=4)
+        await search_knowledge_base(query="test", collection_name=["col-1"], k=4)
         assert mock_client.post.call_args[1]["json"]["k"] == 4
 
 
@@ -282,7 +298,7 @@ async def test_search_metadata_source_fallback():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     assert "[Source: fallback.pdf]" in result
     assert "[Source: unknown source]" in result
@@ -297,7 +313,7 @@ async def test_search_empty_api_key(monkeypatch):
         _make_settings(api_key="", default_collections="col-1"),
     )
 
-    result = await search_knowledge_base(query="test", collection_names=["col-1"])
+    result = await search_knowledge_base(query="test", collection_name=["col-1"])
     assert "API key is not configured" in result
 
 
@@ -309,7 +325,7 @@ async def test_search_whitespace_api_key(monkeypatch):
         _make_settings(api_key="   ", default_collections="col-1"),
     )
 
-    result = await search_knowledge_base(query="test", collection_names=["col-1"])
+    result = await search_knowledge_base(query="test", collection_name=["col-1"])
     assert "API key is not configured" in result
 
 
@@ -324,7 +340,7 @@ async def test_search_non_list_documents():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     assert "unexpected response format" in result
 
@@ -344,7 +360,7 @@ async def test_search_non_dict_metadata_non_float_score():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     assert "[Source: unknown source]" in result
     assert "(score: N/A)" in result
@@ -362,7 +378,7 @@ async def test_search_sends_correct_auth_header():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        await search_knowledge_base(query="test", collection_names=["col-1"])
+        await search_knowledge_base(query="test", collection_name=["col-1"])
 
     call_kwargs = mock_client.post.call_args[1]
     assert call_kwargs["headers"]["Authorization"] == "Bearer test-key"
@@ -386,7 +402,7 @@ async def test_search_docs_present_but_meta_dist_empty():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     # N1 fix: docs should NOT be dropped even when meta/dist are empty
     assert "valid doc text" in result
@@ -408,7 +424,7 @@ async def test_search_malicious_text_with_boundary_token():
     mock_client.post = AsyncMock(return_value=_ok_response(data))
 
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
-        result = await search_knowledge_base(query="test", collection_names=["col-1"])
+        result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     # The real END boundary should be the last line
     lines = result.strip().split("\n")

@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Claude Max Proxy v3.4.0 - XML Tool History Reconstruction
- * Fixes: "[Using tools...]" loop by reconstructing XML tool calls in history
+ * Claude Max Proxy v4.0.0 - Independent OAuth
+ * - PKCE OAuth login via `--login` CLI mode (one-time, on host)
+ * - Auto token refresh with dedicated refresh_token (no CLI competition)
+ * - XML tool call history reconstruction
  */
 
 import { createServer } from 'node:http';
@@ -15,6 +17,9 @@ import { join } from 'node:path';
 const PORT = process.env.PORT || 3456;
 const HOST = process.env.HOST || '127.0.0.1';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+
+const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 
 const CLAUDE_CODE_SYSTEM = "You are Claude Code, Anthropic's official CLI for Claude.";
 
@@ -48,9 +53,9 @@ const AVAILABLE_MODELS = [
   { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
 ];
 
-// Read from mounted directory (not a single file) to survive atomic renames by host CLI.
-// Mount: host ~/.claude/ → container /root/.claude/ (read-only)
-const CONFIG_FILE = process.env.CLAUDE_CREDENTIALS_FILE || join(homedir(), '.claude', '.credentials.json');
+// Proxy's own auth file (independent OAuth, not shared with CLI).
+// In Docker: PROXY_AUTH_FILE=/data/auth.json (volume-mounted from host ~/.claude-max-proxy/)
+const AUTH_FILE = process.env.PROXY_AUTH_FILE || join(homedir(), '.claude-max-proxy', 'auth.json');
 
 let cachedTokens = null;
 let tokenExpiry = 0;
@@ -63,11 +68,15 @@ function loadTokensFromEnv() {
 
 function loadTokensFromFile() {
   try {
-    if (existsSync(CONFIG_FILE)) {
-      const data = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
-      // Flat format (legacy exported tokens)
+    // Priority: proxy's own auth file
+    if (existsSync(AUTH_FILE)) {
+      const data = JSON.parse(readFileSync(AUTH_FILE, 'utf8'));
       if (data.accessToken) return data;
-      // Nested format (Claude Code CLI ~/.claude/.credentials.json)
+    }
+    // Fallback: CLI nested format (~/.claude/.credentials.json)
+    const legacyFile = join(homedir(), '.claude', '.credentials.json');
+    if (existsSync(legacyFile)) {
+      const data = JSON.parse(readFileSync(legacyFile, 'utf8'));
       if (data.claudeAiOauth?.accessToken) return data.claudeAiOauth;
     }
   } catch (e) {}
@@ -83,23 +92,43 @@ function loadTokensFromKeychain() {
 }
 
 function saveTokensToFile(tokens) {
-  try { writeFileSync(CONFIG_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 }); } catch (e) {}
+  try {
+    writeFileSync(AUTH_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+  } catch (e) {
+    console.error(`[TOKEN SAVE ERROR] Could not write to ${AUTH_FILE}: ${e.message}`);
+  }
 }
 
 async function getOAuthTokens() {
   if (cachedTokens && Date.now() < tokenExpiry - 300000) return cachedTokens;
-  // Read-only mode: always reload from file/env (host CLI manages refresh)
   let oauth = loadTokensFromEnv() || loadTokensFromFile() || loadTokensFromKeychain();
-  if (!oauth?.accessToken) throw new Error('No OAuth tokens found. Ensure host CLI is authenticated: run "claude auth status" on the host.');
-  // Token health check with actionable hints
+  if (!oauth?.accessToken) {
+    throw new Error('No OAuth tokens found. Run "node server.js --login" on the host to authorize.');
+  }
+
+  // Auto-refresh if within 5 min of expiry or already expired
+  if (oauth.expiresAt && Date.now() >= oauth.expiresAt - 300000 && oauth.refreshToken) {
+    const refreshed = await doRefreshToken(oauth.refreshToken);
+    if (refreshed) {
+      saveTokensToFile(refreshed);
+      cachedTokens = refreshed;
+      tokenExpiry = refreshed.expiresAt;
+      return refreshed;
+    }
+    // Refresh failed — fall through with expired token (will get 401 from Anthropic)
+    console.error('[TOKEN] Refresh failed, using expired token. Re-run "node server.js --login".');
+  }
+
+  // Token health logging
   const now = Date.now();
   if (oauth.expiresAt && now >= oauth.expiresAt) {
     const expiredAgo = ((now - oauth.expiresAt) / 3600000).toFixed(1);
-    console.error(`[TOKEN EXPIRED] Access token expired ${expiredAgo}h ago. Fix: run "claude" in the host terminal to refresh the token, then re-send your request (no proxy restart needed).`);
+    console.error(`[TOKEN EXPIRED] ${expiredAgo}h ago. Fix: run "node server.js --login" on the host.`);
   } else if (oauth.expiresAt && oauth.expiresAt - now < 1800000) {
     const minsLeft = ((oauth.expiresAt - now) / 60000).toFixed(0);
-    console.warn(`[TOKEN WARNING] Access token expires in ${minsLeft} min. Run "claude" in the host terminal to refresh.`);
+    console.warn(`[TOKEN WARNING] Expires in ${minsLeft} min.`);
   }
+
   cachedTokens = oauth;
   tokenExpiry = oauth.expiresAt || Date.now() + 3600000;
   return oauth;
@@ -107,14 +136,33 @@ async function getOAuthTokens() {
 
 async function doRefreshToken(refreshTok) {
   try {
-    const response = await fetch('https://console.anthropic.com/v1/oauth/token', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshTok, client_id: 'ce88c5c9-c4b6-402a-9f87-b667b4583d19' }),
+    console.log('[TOKEN REFRESH] Attempting token refresh...');
+    const response = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: refreshTok,
+        client_id: CLIENT_ID,
+      }),
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const err = await response.text();
+      console.error(`[TOKEN REFRESH FAILED] Status ${response.status}: ${err}`);
+      console.error('[TOKEN REFRESH FAILED] Fix: run "node server.js --login" on the host to re-authorize.');
+      return null;
+    }
     const data = await response.json();
-    return { accessToken: data.access_token, refreshToken: data.refresh_token || refreshTok, expiresAt: Date.now() + (data.expires_in * 1000) };
-  } catch (e) { return null; }
+    console.log(`[TOKEN REFRESH] Success, new token valid for ${(data.expires_in / 3600).toFixed(1)}h`);
+    return {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || refreshTok,
+      expiresAt: Date.now() + (data.expires_in * 1000),
+    };
+  } catch (e) {
+    console.error(`[TOKEN REFRESH ERROR] ${e.message}`);
+    return null;
+  }
 }
 
 function buildToolContext(tools, systemPrompts) {
@@ -253,6 +301,19 @@ async function handleChat(req, res, body) {
   try { tokens = await getOAuthTokens(); }
   catch (e) { return sendJSON(res, 401, { error: { message: e.message } }); }
 
+  // OAuth API URL with ?beta=true (required for OAuth mode, aligned with opencode)
+  const apiUrl = new URL(ANTHROPIC_API_URL);
+  apiUrl.searchParams.set('beta', 'true');
+  const apiUrlStr = apiUrl.toString();
+
+  const apiHeaders = {
+    'Authorization': `Bearer ${tokens.accessToken}`,
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01',
+    'anthropic-beta': 'oauth-2025-04-20,interleaved-thinking-2025-05-14',
+    'user-agent': 'claude-cli/2.1.2 (external, cli)',
+  };
+
   const requestBody = {
     model: mappedModel,
     system: system,
@@ -271,14 +332,9 @@ async function handleChat(req, res, body) {
     });
 
     try {
-      const response = await fetch(ANTHROPIC_API_URL, {
+      const response = await fetch(apiUrlStr, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${tokens.accessToken}`,
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01',
-          'anthropic-beta': 'oauth-2025-04-20',
-        },
+        headers: apiHeaders,
         body: JSON.stringify({ ...requestBody, stream: true }),
       });
 
@@ -332,14 +388,9 @@ async function handleChat(req, res, body) {
   } else {
     // Sync mode for tool requests
     try {
-      const response = await fetch(ANTHROPIC_API_URL, {
+      const response = await fetch(apiUrlStr, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${tokens.accessToken}`,
-          'Content-Type': 'application/json',
-          'anthropic-version': '2023-06-01',
-          'anthropic-beta': 'oauth-2025-04-20',
-        },
+        headers: apiHeaders,
         body: JSON.stringify(requestBody),
       });
 
@@ -429,9 +480,9 @@ async function handleRequest(req, res) {
   if (path === '/health' || path === '/') {
     try {
       await getOAuthTokens();
-      return sendJSON(res, 200, { status: 'ok', version: '3.4.0', mode: 'xml-history-reconstruction', features: ['oauth', 'tools', 'xml-history'] });
+      return sendJSON(res, 200, { status: 'ok', version: '4.0.0', mode: 'independent-oauth', features: ['oauth', 'auto-refresh', 'tools', 'xml-history'] });
     } catch (e) {
-      return sendJSON(res, 200, { status: 'error', version: '3.4.0', error: e.message });
+      return sendJSON(res, 200, { status: 'error', version: '4.0.0', error: e.message });
     }
   }
 
@@ -452,30 +503,111 @@ async function handleRequest(req, res) {
   sendJSON(res, 404, { error: { message: 'Not found' } });
 }
 
-const server = createServer(handleRequest);
-server.listen(PORT, HOST, async () => {
-  let status = 'checking...';
-  try {
-    const tokens = await getOAuthTokens();
-    if (tokens.expiresAt && Date.now() >= tokens.expiresAt) {
-      status = 'EXPIRED — fix: run "claude" in host terminal';
-    } else if (tokens.expiresAt) {
-      const hoursLeft = ((tokens.expiresAt - Date.now()) / 3600000).toFixed(1);
-      status = `valid (${hoursLeft}h remaining)`;
-    } else {
-      status = 'valid (no expiry info)';
+// ─── CLI: --login (one-time OAuth authorization on host) ───
+if (process.argv.includes('--login')) {
+  (async () => {
+    // 1. Generate PKCE
+    const { createHash, randomBytes } = await import('node:crypto');
+    const verifier = randomBytes(32).toString('base64url');
+    const challenge = createHash('sha256').update(verifier).digest('base64url');
+
+    // 2. Build authorization URL
+    const authUrl = new URL('https://claude.ai/oauth/authorize');
+    authUrl.searchParams.set('code', 'true');
+    authUrl.searchParams.set('client_id', CLIENT_ID);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('redirect_uri', 'https://console.anthropic.com/oauth/code/callback');
+    authUrl.searchParams.set('scope', 'org:create_api_key user:profile user:inference');
+    authUrl.searchParams.set('code_challenge', challenge);
+    authUrl.searchParams.set('code_challenge_method', 'S256');
+    authUrl.searchParams.set('state', verifier);
+
+    console.log('\n=== Claude Max Proxy — OAuth Login ===\n');
+    console.log('Opening browser for authorization...\n');
+
+    // 3. Open browser (cross-platform)
+    const openCmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+    try {
+      execSync(`${openCmd} "${authUrl.toString()}"`, { stdio: 'ignore' });
+    } catch {
+      console.log('Could not open browser automatically. Please visit:\n');
+      console.log(authUrl.toString());
+      console.log();
     }
-  } catch (e) { status = e.message; }
-  console.log(`
+
+    // 4. Wait for user to paste authorization code
+    const readline = await import('node:readline');
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const code = await new Promise(resolve => {
+      rl.question('Paste the authorization code here: ', resolve);
+    });
+    rl.close();
+
+    // 5. Exchange code for tokens
+    const splits = code.trim().split('#');
+    const response = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: splits[0],
+        state: splits[1],
+        grant_type: 'authorization_code',
+        client_id: CLIENT_ID,
+        redirect_uri: 'https://console.anthropic.com/oauth/code/callback',
+        code_verifier: verifier,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error('Authorization failed:', err);
+      process.exit(1);
+    }
+
+    const json = await response.json();
+    const tokens = {
+      accessToken: json.access_token,
+      refreshToken: json.refresh_token,
+      expiresAt: Date.now() + json.expires_in * 1000,
+    };
+
+    // 6. Save (auto-create directory)
+    const { dirname } = await import('node:path');
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(dirname(AUTH_FILE), { recursive: true });
+    writeFileSync(AUTH_FILE, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+    const hoursLeft = (json.expires_in / 3600).toFixed(1);
+    console.log(`\nSuccess! Token saved to ${AUTH_FILE}`);
+    console.log(`Access token valid for ${hoursLeft}h, refresh token will auto-renew.`);
+    process.exit(0);
+  })();
+} else {
+  // ─── Normal server startup ───
+  const server = createServer(handleRequest);
+  server.listen(PORT, HOST, async () => {
+    let status = 'checking...';
+    try {
+      const tokens = await getOAuthTokens();
+      if (tokens.expiresAt && Date.now() >= tokens.expiresAt) {
+        status = 'EXPIRED — run "node server.js --login" on host';
+      } else if (tokens.expiresAt) {
+        const hoursLeft = ((tokens.expiresAt - Date.now()) / 3600000).toFixed(1);
+        status = `valid (${hoursLeft}h remaining)`;
+      } else {
+        status = 'valid (no expiry info)';
+      }
+    } catch (e) { status = e.message; }
+    console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
-║     Claude Max Proxy v3.4.0 (XML History Reconstruction)      ║
+║     Claude Max Proxy v4.0.0 (Independent OAuth)               ║
 ╠═══════════════════════════════════════════════════════════════╣
 ║  Server: http://${HOST}:${PORT}                                   ║
 ║  Token:  ${status.padEnd(45)}║
-║  Fix:    Tool calls in history converted back to XML format   ║
+║  Auth:   ${AUTH_FILE.padEnd(45)}║
 ╚═══════════════════════════════════════════════════════════════╝
 `);
-});
+  });
 
-process.on('SIGTERM', () => { server.close(() => process.exit(0)); });
-process.on('SIGINT', () => { server.close(() => process.exit(0)); });
+  process.on('SIGTERM', () => { server.close(() => process.exit(0)); });
+  process.on('SIGINT', () => { server.close(() => process.exit(0)); });
+}

@@ -20,6 +20,9 @@ class ToolRegistry:
     def get_tool(self, name: str) -> Callable[..., Coroutine[Any, Any, str]] | None:
         return self._tools.get(name)
 
+    def get_schema(self, name: str) -> dict[str, Any] | None:
+        return self._schemas.get(name)
+
     def get_all_schemas(self) -> list[dict[str, Any]]:
         return [
             {"type": "function", "function": {"name": n, **s}}

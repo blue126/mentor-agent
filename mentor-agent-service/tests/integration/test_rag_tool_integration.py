@@ -35,7 +35,8 @@ def test_rag_tools_schemas_complete():
     # Validate search_knowledge_base schema
     search_schema = next(s for s in schemas if s["function"]["name"] == "search_knowledge_base")
     assert "query" in search_schema["function"]["parameters"]["properties"]
-    assert "collection_names" in search_schema["function"]["parameters"]["properties"]
+    # collection_name removed from schema (auto-discover only); k remains
+    assert "collection_name" not in search_schema["function"]["parameters"]["properties"]
     assert "k" in search_schema["function"]["parameters"]["properties"]
     assert search_schema["function"]["parameters"]["required"] == ["query"]
 
@@ -54,7 +55,6 @@ async def test_agent_loop_rag_tool_use():
 
     tool_args = json.dumps({
         "query": "what is machine learning",
-        "collection_names": ["col-1"],
         "k": 2,
     })
     tool_resp = _make_tool_call_response("search_knowledge_base", tool_args, "toolu_rag1")
@@ -87,9 +87,17 @@ async def test_agent_loop_rag_tool_use():
         request=httpx.Request("POST", "http://test"),
     )
 
+    # Mock KB list response for auto-discover (GET /api/v1/knowledge/)
+    kb_list_response = httpx.Response(
+        status_code=200,
+        json=[{"id": "col-1", "name": "ml-basics"}],
+        request=httpx.Request("GET", "http://test"),
+    )
+
     mock_httpx_client = AsyncMock()
     mock_httpx_client.__aenter__ = AsyncMock(return_value=mock_httpx_client)
     mock_httpx_client.__aexit__ = AsyncMock(return_value=False)
+    mock_httpx_client.get = AsyncMock(return_value=kb_list_response)
     mock_httpx_client.post = AsyncMock(return_value=mock_rag_response)
 
     with (

@@ -1,8 +1,12 @@
 """RAG knowledge base tools — search and list knowledge bases via Open WebUI API."""
 
+import logging
+
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _handle_openwebui_error(exc: Exception, func_name: str) -> str:
@@ -37,11 +41,16 @@ def _check_api_key() -> str | None:
 
 async def search_knowledge_base(
     query: str,
-    collection_names: list[str] | None = None,
-    k: int = 4,
+    collection_name: str | list[str] | None = None,
+    k: int = 8,
 ) -> str:
     """Search uploaded documents in Open WebUI knowledge base. Fail Soft: exceptions return error strings."""
     try:
+        logger.info(
+            "search_knowledge_base ENTRY: collection_name=%s, query=%r, k=%s",
+            collection_name, query, k,
+        )
+
         # Input validation
         if not query or not query.strip():
             return "Error: search query is empty. Hint: Provide a specific question or topic to search for."
@@ -51,8 +60,20 @@ async def search_knowledge_base(
         if key_error:
             return key_error
 
-        # Clamp k to valid range
+        # Coerce k to int (XML proxy may pass string) and clamp to valid range
+        try:
+            k = int(k)
+        except (TypeError, ValueError):
+            k = 8
         k = max(1, min(k, 20))
+
+        # Normalize to list for API payload (XML proxy may pass a single string)
+        if isinstance(collection_name, str):
+            collection_names = [collection_name]
+        elif isinstance(collection_name, list):
+            collection_names = collection_name
+        else:
+            collection_names = None
 
         # Resolve collection_names
         if not collection_names:
@@ -60,11 +81,21 @@ async def search_knowledge_base(
             if default_names:
                 collection_names = [n.strip() for n in default_names.split(",") if n.strip()]
             else:
-                return (
-                    "Error: No knowledge base collections specified. "
-                    "Hint: Call list_knowledge_bases first to discover available collection IDs, "
-                    "then pass them as collection_names."
-                )
+                # Auto-discover: fetch all knowledge base IDs instead of failing
+                logger.info("search_knowledge_base: no collection_names provided, auto-discovering...")
+                try:
+                    items = await _fetch_knowledge_base_items()
+                    if isinstance(items, str):
+                        return items  # propagate error
+                    collection_names = [
+                        item["id"] for item in items
+                        if isinstance(item, dict) and item.get("id")
+                    ]
+                    if not collection_names:
+                        return "Error: No knowledge bases found. Upload documents in Open WebUI first."
+                    logger.info("search_knowledge_base: auto-discovered collections=%s", collection_names)
+                except Exception as exc:
+                    return _handle_openwebui_error(exc, "search_knowledge_base(auto-discover)")
 
         url = f"{settings.openwebui_base_url}/api/v1/retrieval/query/collection"
         headers = {
@@ -128,33 +159,38 @@ async def search_knowledge_base(
         return _handle_openwebui_error(exc, "search_knowledge_base")
 
 
+async def _fetch_knowledge_base_items() -> list[dict] | str:
+    """Fetch raw knowledge base items from Open WebUI. Returns list of dicts on success, error string on failure."""
+    key_error = _check_api_key()
+    if key_error:
+        return key_error
+
+    url = f"{settings.openwebui_base_url}/api/v1/knowledge/"
+    headers = {
+        "Authorization": f"Bearer {settings.openwebui_api_key}",
+    }
+    params = {"limit": 100}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+
+    data = response.json()
+
+    if isinstance(data, list):
+        return data
+    elif isinstance(data, dict) and "items" in data:
+        return data["items"]
+    else:
+        return "Error: Open WebUI returned unexpected response format. Hint: Check Open WebUI version compatibility."
+
+
 async def list_knowledge_bases() -> str:
     """List all available knowledge bases from Open WebUI. Fail Soft: exceptions return error strings."""
     try:
-        # API key preflight check
-        key_error = _check_api_key()
-        if key_error:
-            return key_error
-
-        url = f"{settings.openwebui_base_url}/api/v1/knowledge/"
-        headers = {
-            "Authorization": f"Bearer {settings.openwebui_api_key}",
-        }
-        params = {"limit": 100}
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(url, headers=headers, params=params)
-            response.raise_for_status()
-
-        data = response.json()
-
-        # Defensive parsing: response may be list or paginated object
-        if isinstance(data, list):
-            items = data
-        elif isinstance(data, dict) and "items" in data:
-            items = data["items"]
-        else:
-            return "Error: Open WebUI returned unexpected response format. Hint: Check Open WebUI version compatibility."
+        items = await _fetch_knowledge_base_items()
+        if isinstance(items, str):
+            return items  # error message
 
         if not items:
             return "No knowledge bases found. Upload documents in Open WebUI first."

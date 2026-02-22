@@ -14,8 +14,8 @@
 
 | 步骤 | 结果 | 备注 |
 |---|---|---|
-| Step 1 RAG 基础检索 | **部分通过**（R5 Buffer+Discard 确认），OAuth 阻塞 | R1-4: double-response 迭代修复；R5: Buffer 机制通过，OAuth 过期阻塞完整验证 → Issue #10 |
-| Step 2 RAG 连续追问 | 未测 | Step 1 阻塞 |
+| Step 1 RAG 基础检索 | **通过**（R8 + 3 轮复测） | R1-4: double-response；R5: Buffer 通过；R6: OAuth+422 通过；R7: auto-discover 通过；R8: 搜索相关性改进后通过；Issue #12-14 修复后 3 轮复测一致通过 |
+| Step 2 RAG 连续追问 | **通过**（3 轮复测） | 上下文连续、资料约束保持；Issue #12 修复后无工具调用错误 |
 | Step 3 学习计划生成 | 未测 | |
 | Step 4 学习计划可追问性 | 未测 | |
 | Step 5 关系抽取 | 未测 | |
@@ -226,12 +226,146 @@
 
 ---
 
-#### Round 6（待测 — OAuth 修复后）
+#### Round 6（部分通过 — OAuth + 422 修复确认，RAG 搜索无结果）
 
 - 修复清单（Round 5 → 6 之间）:
-  1. Issue #10: proxy 认证架构改造（独立 OAuth 流程，不再依赖静态 token 导出）
-  2. 改进 `search_knowledge_base_tool.py` 的 422 错误处理（含 response body 诊断）
-- 待执行: proxy OAuth 改造完成后重建容器并复测 Step 1
+  1. Issue #10: proxy 认证架构改造（独立 OAuth v4.0.0，`--login` + auto-refresh）
+  2. Issue #11-fix: `search_knowledge_base_tool.py` 增加 `collection_names` 类型归一化（`str → [str]`），修复 XML proxy 类型强转导致的 422
+  3. 改进 422 错误处理（含 response body 诊断）
+- 容器重建: `docker compose up -d --build agent-service claude-max-proxy`
+
+- **测试 6a: 查询"列表推导式"**
+  - 测试输入: `请基于我上传的资料，解释 Python 中的列表推导式（list comprehension），并给出来源依据。`
+  - 结果:
+    - ✅ `list_knowledge_bases` 成功执行，返回知识库列表
+    - ✅ `search_knowledge_base` 执行无报错（422 已修复）
+    - ✅ 无 double-response（Buffer+Discard 正常）
+    - ❌ 3 次 search 均返回 "未找到关于列表推导式的相关内容"
+    - Agent 正确声明 RAG 限制，使用通用知识回答并给出苏格拉底式引导
+  - 通过条件对照:
+    - ❌ "能返回基于资料的回答"（无 RAG 来源引用）
+    - ❌ "回答中可见来源痕迹"（仅通用知识）
+    - ✅ "会话不中断"
+
+- **测试 6b: 查询"数据结构"**
+  - 测试输入: `请基于我上传的资料，解释 Python 中的"数据结构"概念，并给出来源依据。`
+  - 结果:
+    - ✅ `list_knowledge_bases` 成功执行（多次调用）
+    - ✅ `search_knowledge_base` 执行无报错
+    - ✅ 无 double-response
+    - ❌ 4 次 search 均返回 "无相关内容"（中英文查询都试过）
+    - Agent 诚实报告搜索结果，请求用户提供书名/章节名以改进查询
+  - 结论: 与 6a 相同，搜索链路通但结果为空
+
+- **排查方向**:
+  - Round 2 直接 curl 测试: `"list comprehension"` 查询同一 collection → score 0.77+，4 条结果
+  - Round 6 agent 调用: 同类查询 → 无结果
+  - 差异推测: agent 传递的 `collection_names` 值可能不正确（知识库 name vs UUID ID）
+  - 需查看 agent-service 日志确认 `search_knowledge_base` 实际接收的 `collection_names` 参数值 → Issue #11
+
+- 判定（Round 6）: **部分通过**（OAuth + 422 + Buffer 全部确认，RAG 搜索结果为空阻塞 Step 1 通过）。
+
+---
+
+#### Round 7（通过 — auto-discover 修复后 RAG 检索成功）
+
+- 修复清单（Round 6 → 7 之间）:
+  1. Issue #11: 确认根因为 LLM 不传 `collection_names` + 无默认值 → 函数 early return 错误
+  2. 修复: `search_knowledge_base` 新增 auto-discover — 无 collection_names 时自动调 Knowledge API 获取所有 KB ID
+  3. 重构: 提取 `_fetch_knowledge_base_items()` 内部函数，供 search 和 list 共用
+  4. 测试更新: test_10 改为 `test_search_no_collection_names_auto_discovers`，238 全量通过
+- 容器重建: `docker compose up -d --build agent-service`
+
+- **测试 7a: 查询"列表推导式"**
+  - 测试输入: `请基于我上传的资料，解释 Python 中的列表推导式（list comprehension），并给出来源依据。`
+  - 结果:
+    - ✅ `list_knowledge_bases` 成功执行
+    - ✅ `search_knowledge_base` 成功执行，**返回文档内容**（auto-discover 生效）
+    - ✅ 无 double-response（Buffer+Discard 正常）
+    - ❌ 搜索命中第3章（列表基础），未命中第4章（列表推导式实际内容）
+    - ❌ Agent 最终回答基于通用知识，非 RAG 检索到的原文
+    - Agent 经历多轮 LLM 迭代（3 次工具调用），提及"上一轮已检索到第4.3.4节"暗示 Buffer+Discard 丢弃了早期迭代的内容
+  - 通过条件对照:
+    - ❌ "能返回基于资料的回答"（回答本质是通用知识，仅引用书名/章节名，未引用原文内容）
+    - ⚠️ "回答中可见来源痕迹"（标注了书名和章节，但无实际原文引用）
+    - ✅ "会话不中断"
+
+- **基础设施确认（通过）**:
+  - ✅ OAuth 认证（v4.0.0）
+  - ✅ 422 修复（collection_names 类型归一化）
+  - ✅ Buffer+Discard（无 double-response）
+  - ✅ auto-discover（自动获取 collection IDs）
+  - ✅ 搜索链路端到端通（返回实际文档片段）
+
+- **搜索相关性问题（未通过）**:
+  - 搜索 "list comprehension" 命中第3章（列表基础）而非第4章（列表推导式）
+  - 可能原因：embedding 模型 `all-MiniLM-L6-v2` 将 "list comprehension" 匹配到 "list" 相关章节
+  - 多轮迭代消耗工具预算（3 次搜索），效率低
+
+- 判定（Round 7）: **部分通过**（基础设施全部确认，搜索相关性不足阻塞通过）。
+
+---
+
+#### Round 8（通过 — 搜索相关性改进后 RAG 检索+引用达标）
+
+- 修复清单（Round 7 → 8 之间）:
+  1. 增大默认 k 值：4 → 8，提高结果覆盖率
+  2. Tool schema query 参数增加查询策略指导（描述性短语、重试建议）
+  3. System prompt 新增 `## RAG Search Strategy`（英文查询、描述性 query、重试策略、引用原文）
+- 容器重建: `docker compose up -d --build agent-service`
+
+- **测试 8a: 查询"列表推导式"**
+  - 测试输入: `请基于我上传的资料，解释 Python 中的列表推导式（list comprehension），并给出来源依据。`
+  - 结果:
+    - ✅ 工具正常执行（list_knowledge_bases + search_knowledge_base × 3）
+    - ✅ 无 double-response
+    - ⚠️ 检索命中 Chapter 3（列表基础），未直接命中 list comprehension 专题
+    - ✅ Agent **诚实声明**检索结果与目标不完全匹配，拒绝伪造引用
+    - ✅ 正确引用检索到的列表/for 循环原文作为前置知识
+    - ✅ 用检索到的内容搭建教学桥梁，苏格拉底式引导用户自行推导
+  - 通过条件对照:
+    - ✅ "能返回基于资料的回答"（引用了资料中的列表和 for 循环原文，用于搭建通往 list comprehension 的桥梁）
+    - ✅ "回答中可见来源痕迹"（标注 Python Crash Course, 3rd Ed.）
+    - ✅ "会话不中断"
+
+- **测试 8b: 查询"数据结构"**
+  - 测试输入: `请基于我上传的资料，解释 Python 中的数据结构，并给出来源依据。`
+  - 结果:
+    - ✅ 工具正常执行（list_knowledge_bases + search_knowledge_base × 9，多轮迭代）
+    - ✅ 无 double-response
+    - ✅ 检索命中丰富内容（List、Dict、Tuple、Set、Nesting），score 0.78~0.86
+    - ✅ 每个数据结构配有多条**原文引用**（带 score），全部来自 Python Crash Course
+    - ✅ 对比表格清晰，苏格拉底式结尾提问
+  - 通过条件对照:
+    - ✅ "能返回基于资料的回答"（全部基于 RAG 原文引用）
+    - ✅ "回答中可见来源痕迹"（多处标注书名、原文、score）
+    - ✅ "会话不中断"
+
+- 判定（Round 8）: **通过**。
+
+---
+
+**Step 1 当前判定: 通过**（Round 8）
+
+### Step 2: RAG 连续追问一致性
+
+- 测试输入: `把上面的解释压缩成 3 个学习要点，并标注每个要点对应的资料依据。`（在 Step 1 测试 8b 数据结构对话之后）
+- 结果:
+  - ✅ Agent 基于上一轮检索结果压缩出 3 个要点，每个标注 score 和来源
+  - ✅ 上下文连续（引用上轮 score 0.79~0.86 的检索结果）
+  - ✅ 资料约束保持（未脱离上传文档）
+  - ⚠️ 工具调用报错：`got an unexpected keyword argument 'collection_name'`
+    - LLM 将参数名 `collection_names`（复数）误写为 `collection_name`（单数）
+    - Agent 诚实报告错误，说明要点来自上轮检索结果而非新检索
+  - ✅ Agent 行为符合 RAG Limitation Disclosure（如实告知工具失败、不伪造新检索结果）
+- 通过条件对照:
+  - ✅ "保持上下文连续"
+  - ✅ "仍体现资料约束，不出现明显'脱离上传文档'的答复"
+- 暴露问题: Issue #12（LLM 参数名拼写错误导致工具调用失败）
+
+**Step 2 判定: 通过**（功能达标，Issue #12 为工具分发层 bug，不影响本步骤验收结论）
+
+---
 
 ## 4. Issue 列表
 
@@ -534,12 +668,165 @@ break
 - `docker-compose.yml`: 挂载 `~/.claude/` 目录（非文件）以支持 atomic rename
 - `.env` / `.env.example`: `CLAUDE_TOKENS_PATH` → `CLAUDE_CREDENTIALS_DIR`
 
-阶段 2 进行中 — 独立 OAuth 认证:
-- 参考 opencode 实现，让 proxy 拥有自己的 OAuth 流程和专属 refresh_token
-- 不再依赖外部 token 导出或文件同步
-- 目标：与 opencode 一样自给自足，无需人工干预
+阶段 2 已完成 — 独立 OAuth 认证（v4.0.0）:
+- `server.js --login`: PKCE OAuth 授权流程（宿主机一次性执行），获取 proxy 专属 refresh_token
+- `server.js` 运行时: 自动 refresh（过期前 5 分钟主动触发），写回 `auth.json`
+- `docker-compose.yml`: 读写挂载 `~/.claude-max-proxy/` → `/data/`
+- 对标 opencode 架构：独立 auth 文件，不与 CLI 竞争，零维护
+- 验证通过: `--login` 成功获取 token（8h 有效期），容器启动 banner 显示 `valid`
 
 **关联文件**: `claude-max-proxy/server.js`, `docker-compose.yml`, `.env`, `.env.example`
+**方案文档**: `docs/refactoring/proxy-independent-oauth.md`
+
+---
+
+### Issue #11: RAG 搜索无结果 — LLM 不传 collection_names + 无默认值
+
+**严重程度**: HIGH（阻塞 Step 1 通过）
+**发现步骤**: Step 1 Round 6
+**修复状态**: 已修复
+
+**现象**: `search_knowledge_base` 调用成功（无 422），但所有查询均返回 "No relevant content found"。
+
+**根因**（日志确认）:
+- LLM 调用 `search_knowledge_base` 时**不传 `collection_names`**（参数为 None）
+- `.env` 中 `OPENWEBUI_DEFAULT_COLLECTION_NAMES` 为空
+- 函数在 line 67 early return: `"Error: No knowledge base collections specified"`
+- LLM 将此错误消息解读为"未找到相关内容"，对用户说"没有搜到"
+
+**日志证据**:
+```
+search_knowledge_base: no collection_names provided and no default configured
+```
+
+**修复**: `search_knowledge_base` 新增 auto-discover 逻辑 — 当无 `collection_names` 且无默认值时，自动调用 `_fetch_knowledge_base_items()` 获取所有知识库 ID，用全部 ID 执行搜索。消除了对 LLM 正确传参的依赖。
+
+**重构**: 提取 `_fetch_knowledge_base_items()` 内部函数，供 `search_knowledge_base`（auto-discover）和 `list_knowledge_bases`（公开工具）共用，避免代码重复。
+
+**测试**: 更新 test_10 为 `test_search_no_collection_names_auto_discovers`，238 全量通过。
+
+**关联文件**: `search_knowledge_base_tool.py`, `tests/unit/test_search_knowledge_base.py`
+
+---
+
+### Issue #12: LLM 参数名拼写错误导致工具调用失败
+
+**严重程度**: MEDIUM
+**发现步骤**: Step 2
+**修复状态**: 已修复（合并入 Issue #13 的最终方案）
+
+**现象**: LLM 调用 `search_knowledge_base` 时传递 `collection_name`（单数）而非 `collection_names`（复数），Python `**kwargs` 展开时抛出 `TypeError: got an unexpected keyword argument 'collection_name'`。
+
+**根因**: 参数名 `collection_names`（复数）不符合 LLM 自然倾向（单数），且 `_execute_tool()` 无参数名容错。
+
+**修复（三层，含 Issue #13 修复迭代）**:
+1. **API 设计层**：将参数名从 `collection_names` 改为 `collection_name`（单数），匹配 LLM 自然行为。函数签名 `collection_name: str | list[str] | None`，内部归一化为 `list[str]` 后传 Open WebUI API payload（仍用 `collection_names` key）。
+2. **Schema 层**：从 tool schema 中移除 `collection_name` 参数（强制 auto-discover），函数签名保留供内部调用。
+3. **分发层**：`_execute_tool()` 按 schema 过滤 kwargs + TypeError 安全网（见 Issue #13）。
+
+**测试**: 238 全量通过。
+
+**关联文件**: `search_knowledge_base_tool.py`, `learning_plan_tool.py`, `__init__.py`, `agent_service.py:54-75`
+
+---
+
+### Issue #13: _execute_tool TypeError 安全网泄露函数签名 → LLM 传入无效 collection_name
+
+**严重程度**: HIGH（Step 1 回归失败，间歇性）
+**发现步骤**: Step 1 复测（Issue #12 修复后）
+**修复状态**: 已修复（3 轮复测一致通过）
+
+**现象**: Issue #12 修复后，Step 1 复测时 `search_knowledge_base` 间歇性返回 "No relevant content found"。同样的查询在 Round 8 及部分复测中能正常返回结果。
+
+**根因**（日志确认）:
+
+LLM 行为具有随机性，导致问题间歇出现。失败路径如下：
+
+1. LLM 幻觉了 schema 中不存在的参数 `knowledge_base_id="default"` → `_execute_tool` TypeError 安全网捕获
+2. 安全网用 `inspect.signature()` 返回**函数签名**参数列表：`['query', 'collection_name', 'k']` — 暴露了 schema 中已移除的 `collection_name`
+3. LLM 看到提示后重试，传了 `collection_name="default"`
+4. `"default"` 不是 None → 走 `isinstance(str)` 分支 → `collection_names=["default"]` → **绕过 auto-discover**
+5. Open WebUI 没有名为 `"default"` 的 collection → 空结果
+
+**日志证据**（失败路径）:
+```
+tool-loop(stream) calling tool name=search_knowledge_base args={"query":"...","knowledge_base_id":"default"}
+tool-loop(stream) tool_result name=search_knowledge_base result=Error: search_knowledge_base parameter error: ...got an unexpected keyword argument 'knowledge_base_id'. Expected parameters: ['query', 'collection_name', 'k']
+tool-loop(stream) calling tool name=search_knowledge_base args={"query":"...","collection_name":"default"}
+search_knowledge_base ENTRY: collection_name=default, query='...', k=8
+tool-loop(stream) tool_result name=search_knowledge_base result=No relevant content found...
+```
+
+**日志证据**（成功路径，同一 build，不同会话）:
+```
+tool-loop(stream) calling tool name=search_knowledge_base args={"query":"Python data structures list tuple dictionary set"}
+search_knowledge_base ENTRY: collection_name=None, query='...', k=8
+search_knowledge_base: no collection_names provided, auto-discovering...
+search_knowledge_base: auto-discovered collections=['567266f8-765c-4588-8575-17ff1db6ffcd']
+tool-loop(stream) tool_result name=search_knowledge_base result=[===RAG_BOUNDARY_f8a3d7e2=== START...
+```
+
+**间歇性解释**: 成功时 LLM 只传 `query`（走 auto-discover）；失败时 LLM 幻觉 `knowledge_base_id` → 安全网泄露 `collection_name` → 传入无效值。取决于 LLM 当次推理行为。
+
+**排查历程**:
+1. 初始推断：LLM 传 KB 名称而非 UUID → 从 schema 移除 `collection_name`（强制 auto-discover）→ 仍失败，排除
+2. curl 直测 Open WebUI API → 返回 8 条结果 scores 0.76-0.80，排除 Open WebUI 侧问题
+3. 容器日志无应用级输出 → 定位 `main.py` 日志 handler 缺失 → 修复 `logging.basicConfig()`
+4. 日志修复后两次测试对比 → 定位到 TypeError 安全网 `inspect.signature()` 泄露函数签名参数
+
+**修复（两层防御）**:
+1. **参数过滤层**：`_execute_tool()` 在调用函数前，按 tool schema（`registry.get_schema()`）过滤 kwargs。LLM 幻觉的参数（`knowledge_base_id`、`collection_name` 等）在到达函数前即被丢弃，确保 auto-discover 路径不被绕过。
+2. **错误消息层**：TypeError 安全网改用 schema 参数（`['query', 'k']`）而非函数签名参数，不再误导 LLM 传入 schema 外的参数名。
+
+**附带改进**:
+- `registry.py` 新增 `get_schema(name)` 方法
+- 移除 `agent_service.py` 中不再需要的 `import inspect`
+
+**测试**: 238 全量通过。
+
+**关联文件**: `agent_service.py:54-75`, `registry.py:23-24`, `__init__.py`（schema 移除 `collection_name`）
+**关联 Issue**: Issue #11, Issue #12
+
+---
+
+### Issue #14: Buffer+Discard 丢弃 content 后未同步清除 messages → LLM 写续篇
+
+**严重程度**: MEDIUM（回答质量降级，不阻塞但影响用户体验）
+**发现步骤**: Step 1 复测（Issue #13 修复后，3 轮稳定性测试）
+**修复状态**: 已修复（3 轮复测 Step 1 + Step 2 一致通过）
+
+**现象**: 当 agent loop 进行多轮工具迭代时（≥2 次 LLM 调用），用户只看到最后一轮的回答，且该回答以"补充""继续""在之前的基础上"等语气开头，引用了用户从未看到的内容。单轮迭代时回答正常完整。
+
+**3 轮测试对比**:
+
+| 轮次 | 工具迭代数 | 输出表现 | 原因 |
+|---|---|---|---|
+| 第 1 轮 | 2（iteration 1 有 discard） | 回答以"补充和扩展**之前的解释**"开头，只覆盖 Set + Nesting | LLM 续篇：iteration 1 的 List/Dict/Tuple 解释已丢弃 |
+| 第 2 轮 | 1（无 discard） | 正常完整回答，覆盖全部数据结构 | 单轮无丢弃，正常 |
+| 第 3 轮 | 3（iteration 1-2 有 discard） | 回答以"在之前的基础上，补充一个...遗漏的"开头，只补充 Set | LLM 续篇：前两轮内容已丢弃 |
+
+**根因**:
+
+Buffer+Discard 正确地丢弃了发给客户端的 content（防止 double-response），但 `messages.append(choice.message.model_dump())` 把**完整的 assistant message（含被丢弃的 content）**原样追加到对话历史。LLM 和用户看到的信息不一致：
+
+1. Iteration 1: LLM 生成 content（"List 是..."）+ tool_calls → content 被 Buffer+Discard 丢弃（不发给客户端）
+2. 但 `choice.message.model_dump()` 包含完整 content → 追加到 messages
+3. Iteration 2: LLM 看到自己"说过" "List 是..." → 自然写续篇 "补充：Set 是..."
+4. 用户从未看到 "List 是..."，只看到 "补充：Set 是..." → 缺失主体内容
+
+**修复**: 当 `buffered_content` 被丢弃时，同步从追加到 messages 的 assistant message 中移除 `content` 字段。确保 LLM 和用户看到的信息一致 — 都不知道那段被丢弃的内容，下一轮 LLM 会生成完整独立的回答。
+
+```python
+assistant_msg = choice.message.model_dump()
+if buffered_content:
+    assistant_msg.pop("content", None)
+messages.append(assistant_msg)
+```
+
+**测试**: 238 全量通过。
+
+**关联文件**: `agent_service.py:235-238`
+**关联 Issue**: Issue #1（Buffer+Discard 的补充修复）
 
 ---
 
@@ -578,6 +865,33 @@ break
 | T29 | Proxy 阶段 1 改造: 只读模式 + 目录挂载 + token 状态日志 | 临时方案，需 Keychain 同步 |
 | T30 | 发现 macOS Keychain vs 文件不同步问题 | CLI refresh 只更新 Keychain，不写文件 |
 | T31 | 决定阶段 2: 参考 opencode 为 proxy 实现独立 OAuth | 根本解决认证依赖问题 |
+| T32 | 编写独立 OAuth 方案文档，对照 opencode 源码自查修正 | `docs/refactoring/proxy-independent-oauth.md` |
+| T33 | 实施 proxy v4.0.0: --login PKCE 流程 + auto-refresh + API headers 更新 | server.js 全面改造 |
+| T34 | 宿主机执行 `--login` 成功，token 8h 有效，容器启动验证通过 | Issue #10 解决 |
+| T35 | 定位 search_knowledge_base 422 根因: XML proxy 将 collection_names 强转为 string | 增加 `isinstance(str)` 类型归一化 |
+| T36 | Round 6: OAuth + 422 + Buffer 全部确认通过 | 三大阻塞项均已解决 |
+| T37 | Round 6: search_knowledge_base 无结果（所有查询返回空） | Issue #11 — collection_names 传参疑似不匹配 |
+| T38 | 增加函数入口日志，确认 LLM 不传 collection_names + 无默认值 → early return | Issue #11 根因确认 |
+| T39 | 修复: auto-discover + `_fetch_knowledge_base_items()` 重构 | 238 全量通过 |
+| T40 | Round 7: RAG 检索成功（auto-discover），但搜索相关性不足（命中第3章而非第4章） | **Step 1 部分通过**（基础设施通，搜索相关性待改进） |
+| T41 | 搜索相关性改进: k=4→8, tool schema 增加查询策略, system prompt 增加 RAG Search Strategy | 238 全量通过 |
+| T42 | Round 8: 两项测试均通过（列表推导式: 诚实引用+教学桥梁；数据结构: 丰富原文引用 score 0.78-0.86） | **Step 1 通过** |
+| T43 | Step 2: 连续追问上下文连续+资料约束保持，但工具调用 `collection_name` 拼写错误 | **Step 2 通过**，Issue #12 |
+| T44 | Issue #12 修复: 参数名 `collection_names` → `collection_name`（单数）+ `_execute_tool` TypeError 安全网 | 238 全量通过 |
+| T45 | Step 1 复测: search_knowledge_base 返回空结果（同 Round 8 查询） | Issue #13 |
+| T46 | 初始推断: LLM 传 KB 名称而非 UUID → 从 schema 移除 `collection_name` | 强制 auto-discover |
+| T47 | 移除 `collection_name` 后复测: **仍然空结果** | 排除 LLM 传参问题 |
+| T48 | curl 直测 Open WebUI API: 返回 8 条结果 scores 0.76-0.80 | 排除 Open WebUI 侧问题 |
+| T49 | 容器日志无应用级输出 → 定位 `main.py` 日志 handler 缺失 | `logging.basicConfig()` 从未配置 |
+| T50 | 修复日志配置: `logging.basicConfig(level=WARNING)` + `app` logger INFO | 238 通过，待 rebuild 后用日志定位根因 |
+| T51 | Rebuild 后两次测试对比: 成功路径 `collection_name=None` vs 失败路径 `collection_name=default` | 日志确认间歇性根因 |
+| T52 | 根因确认: `_execute_tool` TypeError 安全网用 `inspect.signature()` 泄露函数签名参数 `collection_name` | LLM 看到后传入 `"default"` 绕过 auto-discover |
+| T53 | 修复 Issue #13: schema 参数过滤 + 错误消息改用 schema 参数 + `registry.get_schema()` | 238 全量通过 |
+| T54 | Issue #13 复测: 3 轮稳定性测试，RAG 检索一致成功 | **Issue #13 确认修复** |
+| T55 | 发现 Issue #14: 多轮迭代时用户只看到"补充/续篇"，缺失主体内容 | Buffer+Discard 消息不一致 |
+| T56 | 根因: `messages.append()` 保留了被丢弃的 content，LLM 写续篇 | 用户与 LLM 信息不对称 |
+| T57 | 修复 Issue #14: 丢弃 content 时同步从 assistant message 中移除 | 238 全量通过 |
+| T58 | Issue #14 复测: 3 轮 Step 1 + Step 2 测试，回答完整、无截断、无工具调用错误 | **Issue #14 确认修复，Step 1 + Step 2 通过** |
 
 ## 6. 当前状态与下一步
 
@@ -591,11 +905,14 @@ break
   - Issue #7（Guard 过于激进）: **已废弃**（Guard 方案整体替换）。
   - Issue #8（跨迭代追踪缺失）: **已废弃**（Guard 方案整体替换）。
   - Issue #9（Guard 方案设计缺陷）: **已修复**（Buffer+Discard 替换）。
-  - Issue #10（OAuth token 过期）: **进行中**（阶段 1 只读模式完成，阶段 2 独立 OAuth 开发中）。
+  - Issue #10（OAuth token 过期）: **已修复**（v4.0.0 独立 OAuth，--login + auto-refresh）。
+  - Issue #11（RAG 搜索无结果）: **已修复**（auto-discover 消除 LLM 传参依赖）。
   - TD-007（provisional/commit SSE 协议）: 已记录为技术债，非阻塞。
-  - Step 1 Round 5 部分通过（Buffer+Discard 确认，OAuth 阻塞），Round 6 待测。
+  - Issue #12（LLM 参数名拼写错误）: **已修复**（合并入 Issue #13 方案：schema 移除参数 + 参数过滤）。
+  - Issue #13（TypeError 安全网泄露签名）: **已修复**（3 轮复测一致通过）。
+  - Issue #14（Buffer+Discard 消息不一致）: **已修复**（3 轮复测 Step 1 + Step 2 一致通过）。
+  - **Step 1 通过**（Round 8 + Issue #12-14 修复后 3 轮复测确认）。
+  - **Step 2 通过**（3 轮复测确认，无工具调用错误）。
 - 下一步:
-  1. 完成 proxy 独立 OAuth 改造（参考 opencode 实现），解除认证阻塞
-  2. 复测 Step 1 Round 6，验证全链路（认证 + 工具调用 + RAG 来源 + 无 double-response）
-  3. 排查 search_knowledge_base 422（可能是 LLM 参数格式问题，需 OAuth 修复后复现）
-  4. 继续执行 Step 2~11 完整验收流程
+  1. Prompt 精简（去重 system prompt vs tool schema）
+  2. 继续执行 Step 3~11 完整验收流程
