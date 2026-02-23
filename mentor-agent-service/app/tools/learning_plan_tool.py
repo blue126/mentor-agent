@@ -8,7 +8,13 @@ import time
 from app.dependencies import async_session_factory
 from app.services import graph_service
 from app.services.llm_service import get_chat_completion
-from app.tools.search_knowledge_base_tool import search_knowledge_base
+from app.tools.search_knowledge_base_tool import (
+    _extract_filenames,
+    _fetch_collection_files,
+    _query_collection_raw,
+    _resolve_collection_name_to_id,
+    search_knowledge_base,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +42,113 @@ PLAN_LIMITS = {
 
 _RAG_TEXT_MAX_LENGTH = 8000
 _LLM_TIMEOUT_SECONDS = 30
+_MIN_CHUNKS_FOR_PLAN = 2
+_MAX_BATCH_FILES = 10
 
 
 def _normalize_name(name: str) -> str:
     """Normalize a source name for storage and comparison."""
     return name.strip()
+
+
+def _clean_filename(filename: str) -> str:
+    """Remove file extension for use as topic name. 'Pro Git.pdf' -> 'Pro Git'"""
+    if "." in filename:
+        return filename.rsplit(".", 1)[0].strip()
+    return filename.strip()
+
+
+def _match_filename(source_name: str, filenames: list[str]) -> str | list[str] | None:
+    """Match source_name against filenames.
+
+    Returns:
+        str — unique match
+        list[str] — multiple candidates (ambiguous)
+        None — no match
+    """
+    normalized = source_name.strip().lower()
+
+    # Pass 1: exact match (with/without extension)
+    exact = []
+    for fname in filenames:
+        if fname.strip().lower() == normalized:
+            return fname  # exact full match
+        stem = fname.rsplit(".", 1)[0].strip().lower() if "." in fname else fname.strip().lower()
+        if stem == normalized:
+            exact.append(fname)
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        return exact  # ambiguous
+
+    # Pass 2: substring match — collect all candidates
+    candidates = [f for f in filenames if normalized in f.strip().lower()]
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        return candidates  # ambiguous
+
+    return None
+
+
+def _stem(filename: str) -> str:
+    """Extract stem (name without extension) in lowercase. 'Pro Git.pdf' -> 'pro git'"""
+    name = filename.strip().lower()
+    if "." in name:
+        name = name.rsplit(".", 1)[0]
+    return name.strip()
+
+
+def _filter_chunks_by_source(
+    docs: list[str], metas: list[dict], dists: list[float], target_filename: str
+) -> tuple[list[str], list[dict], list[float]]:
+    """Filter RAG chunks where metadata name/source matches target_filename.
+
+    Matching strategy (case-insensitive, any of):
+      1. Stem-equal: stem(target) == stem(metadata name)
+      2. Bidirectional containment on stem: stem(target) in stem(name) or vice versa
+      3. Target stem found in source path (for path-style metadata)
+    """
+    target_s = _stem(target_filename)
+    if not target_s:
+        return [], [], []
+
+    filtered_docs = []
+    filtered_metas = []
+    filtered_dists = []
+    for doc, meta, dist in zip(docs, metas, dists):
+        meta_name = (meta.get("name") or "").strip().lower()
+        meta_source = (meta.get("source") or "").strip().lower()
+        name_s = _stem(meta_name) if meta_name else ""
+
+        matched = (
+            # Stem equality
+            (name_s and name_s == target_s)
+            # Bidirectional containment on stems
+            or (name_s and (target_s in name_s or name_s in target_s))
+            # Target stem in source path
+            or (meta_source and target_s in meta_source)
+        )
+        if matched:
+            filtered_docs.append(doc)
+            filtered_metas.append(meta)
+            filtered_dists.append(dist)
+    return filtered_docs, filtered_metas, filtered_dists
+
+
+def _format_ambiguous_matches(source_name: str, candidates: list[str]) -> str:
+    """Format ambiguous match error with candidate list for user selection."""
+    lines = [
+        f"Multiple documents match '{source_name}':",
+    ]
+    for c in candidates:
+        lines.append(f"  - {c}")
+    lines.append("")
+    lines.append(
+        "Hint: Call generate_learning_plan again with source_name "
+        "set to the exact filename."
+    )
+    return "\n".join(lines)
 
 
 def _parse_and_validate_plan(text: str) -> list[dict] | str:
@@ -186,17 +294,292 @@ def _format_plan_from_db(source_name: str, concepts: list[dict]) -> str:
     return _format_plan(source_name, chapters, status="Existing plan")
 
 
+async def _resolve_plan_display(topic: dict, session, *, status: str = "Existing plan") -> str:
+    """Resolve the best display for a topic's learning plan.
+
+    Prefers the stored JSON in topic.description (generation-time snapshot).
+    Falls back to DB heuristic reconstruction for legacy topics (description=None).
+
+    Note: description is a generation-time snapshot. If concept editing is added
+    in the future, description must be cleared or updated to avoid drift.
+    """
+    desc = topic.get("description")
+    if desc:
+        try:
+            plan_data = json.loads(desc)
+            if (
+                isinstance(plan_data, list)
+                and plan_data
+                and isinstance(plan_data[0], dict)
+                and "chapter" in plan_data[0]
+            ):
+                return _format_plan(topic["name"], plan_data, status=status)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    # Fallback: legacy topic without stored JSON
+    concepts = await graph_service.get_concepts_by_topic(session, topic["id"])
+    if not concepts:
+        return f"Learning plan '{topic['name']}' exists but has no concepts yet."
+    return _format_plan_from_db(topic["name"], concepts)
+
+
+async def _find_existing_topic(session, normalized_name: str) -> dict | None:
+    """Find topic by exact name, then case-insensitive fallback."""
+    existing = await graph_service.get_topic_by_name(session, normalized_name)
+    if existing is None:
+        all_topics = await graph_service.get_all_topics(session)
+        for t in all_topics:
+            if t["name"].strip().lower() == normalized_name.lower():
+                existing = t
+                break
+    return existing
+
+
+async def _write_plan_to_db(
+    session, topic_name: str, parsed: list[dict], *, old_topic_id: int | None = None
+) -> dict:
+    """Atomic DB write: optionally delete old topic, then create new topic + concepts.
+
+    Returns the new topic dict. Caller must handle commit/rollback.
+    """
+    if old_topic_id is not None:
+        await graph_service.delete_topic_cascade(session, old_topic_id, auto_commit=False)
+
+    topic = await graph_service.add_topic(
+        session,
+        topic_name,
+        description=json.dumps(parsed, ensure_ascii=False),
+        source_material=topic_name,
+        auto_commit=False,
+    )
+
+    total_concepts = 0
+    for ch in parsed:
+        await graph_service.add_concept(
+            session,
+            ch["chapter"],
+            topic_id=topic["id"],
+            auto_commit=False,
+        )
+        total_concepts += 1
+        for sec in ch.get("sections", []):
+            await graph_service.add_concept(
+                session,
+                sec,
+                topic_id=topic["id"],
+                auto_commit=False,
+            )
+            total_concepts += 1
+
+    return topic
+
+
+async def _run_llm_analysis(toc_text: str) -> str | list[dict]:
+    """Run LLM TOC analysis and parse result. Returns parsed list or error string."""
+    if len(toc_text) > _RAG_TEXT_MAX_LENGTH:
+        toc_text = toc_text[:_RAG_TEXT_MAX_LENGTH] + "\n[truncated]"
+
+    prompt = TOC_ANALYSIS_PROMPT.format(toc_content=toc_text)
+    try:
+        plan_json = await asyncio.wait_for(
+            get_chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2000,
+            ),
+            timeout=_LLM_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        return (
+            "Error: LLM analysis timed out. "
+            "Hint: The service may be busy — please try again in a moment."
+        )
+
+    if plan_json.startswith("Error"):
+        return (
+            "Error: Failed to analyze document structure. "
+            "Hint: The document may not have a clear table of contents. Try providing a custom query."
+        )
+
+    parsed = _parse_and_validate_plan(plan_json)
+    if isinstance(parsed, str):
+        if "Validation" in parsed:
+            detail = parsed.split("—", 1)[-1].strip() if "—" in parsed else parsed
+            return (
+                f"Error: Extracted structure is invalid ({detail}). "
+                "Hint: Try again or provide a custom query to help the LLM find better content."
+            )
+        return (
+            "Error: Could not parse the chapter structure from LLM response. "
+            "Hint: Try again — LLM output varies between calls."
+        )
+
+    return parsed
+
+
+async def _generate_plan_for_file(
+    filename: str,
+    collection_uuid: str,
+    query: str | None,
+    force: bool,
+    *,
+    topic_name_override: str | None = None,
+) -> str:
+    """Generate a learning plan for a single file within a multi-doc collection.
+
+    Args:
+        topic_name_override: If provided, use this as the topic name instead of
+            deriving from filename. Used by batch mode to pass dedup'd names.
+    """
+    original_stem = _clean_filename(filename)
+    topic_name = topic_name_override or original_stem
+    if not topic_name:
+        return f"Error: empty filename after cleaning '{filename}'"
+
+    # Idempotency check
+    old_topic_id = None
+    async with async_session_factory() as session:
+        existing = await _find_existing_topic(session, topic_name)
+        if existing is not None:
+            if not force:
+                return "skip_existing"
+            old_topic_id = existing["id"]
+
+    # RAG search: always use original stem (not dedup'd override like "Book (2)")
+    search_query = query or f"table of contents chapters {original_stem}"
+    f_docs: list[str] = []
+    f_metas: list[dict] = []
+    f_dists: list[float] = []
+
+    for attempt_k in (20, 40):
+        raw = await _query_collection_raw(
+            query=search_query,
+            collection_names=[collection_uuid],
+            k=attempt_k,
+        )
+        if isinstance(raw, str):
+            return f"Error: RAG failed for '{topic_name}': {raw}"
+
+        docs, metas, dists = raw
+        f_docs, f_metas, f_dists = _filter_chunks_by_source(docs, metas, dists, filename)
+
+        logger.info(
+            "_generate_plan_for_file file=%s k=%d raw=%d filtered=%d",
+            filename, attempt_k, len(docs), len(f_docs),
+        )
+
+        if len(f_docs) >= _MIN_CHUNKS_FOR_PLAN:
+            break
+
+        if attempt_k == 20 and docs:
+            meta_names = {(m.get("name") or m.get("source") or "?") for m in metas[:5]}
+            logger.warning(
+                "_generate_plan_for_file insufficient after k=%d for '%s' "
+                "(need %d, got %d). Sample meta names: %s. Retrying with k=%d.",
+                attempt_k, filename, _MIN_CHUNKS_FOR_PLAN,
+                len(f_docs), meta_names, 40,
+            )
+
+    if len(f_docs) < _MIN_CHUNKS_FOR_PLAN:
+        return "insufficient_chunks"
+
+    # Combine filtered docs for LLM
+    toc_text = "\n\n".join(f_docs)
+
+    # LLM analysis
+    parsed = await _run_llm_analysis(toc_text)
+    if isinstance(parsed, str):
+        return parsed  # error string
+
+    # Atomic DB write (build-then-replace)
+    async with async_session_factory() as session:
+        try:
+            await _write_plan_to_db(
+                session, topic_name, parsed, old_topic_id=old_topic_id
+            )
+            await session.commit()
+            await graph_service.load_graph(session)
+        except Exception as exc:
+            await session.rollback()
+            logger.warning("_generate_plan_for_file db error file=%s: %s", filename, exc)
+            return f"Error: Failed to save learning plan for '{topic_name}': {exc}"
+
+    # Return summary info
+    total_sections = sum(len(ch.get("sections", [])) for ch in parsed)
+    return f"ok:{len(parsed)}:{total_sections}"
+
+
+async def _generate_plans_batch(
+    filenames: list[str],
+    collection_uuid: str,
+    query: str | None,
+    force: bool,
+    collection_display_name: str,
+) -> str:
+    """Generate learning plans for multiple files in a collection."""
+    # Limit batch size
+    truncated = False
+    if len(filenames) > _MAX_BATCH_FILES:
+        filenames = filenames[:_MAX_BATCH_FILES]
+        truncated = True
+
+    # Topic name dedup tracking
+    used_names: set[str] = set()
+    name_map: dict[str, str] = {}  # filename -> topic_name
+    for fname in filenames:
+        clean = _clean_filename(fname)
+        if clean.lower() in used_names:
+            suffix = 2
+            while f"{clean} ({suffix})".lower() in used_names:
+                suffix += 1
+            clean = f"{clean} ({suffix})"
+        used_names.add(clean.lower())
+        name_map[fname] = clean
+
+    results: list[str] = []
+    for fname in filenames:
+        try:
+            result = await _generate_plan_for_file(
+                fname, collection_uuid, query, force,
+                topic_name_override=name_map[fname],
+            )
+            if result == "skip_existing":
+                results.append(f"\u23ed\ufe0f {name_map[fname]} — already exists (use force=true to regenerate)")
+            elif result == "insufficient_chunks":
+                results.append(f"\u274c {name_map[fname]} — insufficient content found")
+            elif result.startswith("ok:"):
+                parts = result.split(":")
+                ch_count = parts[1]
+                sec_count = parts[2]
+                results.append(f"\u2705 {name_map[fname]} — {ch_count} chapters, {sec_count} sections")
+            else:
+                # Error string
+                results.append(f"\u274c {name_map[fname]} — {result}")
+        except Exception as exc:
+            logger.warning("_generate_plans_batch file=%s error=%s", fname, exc)
+            results.append(f"\u274c {name_map[fname]} — unexpected error: {exc}")
+
+    lines = [f'\U0001f4da Generated learning plans for collection "{collection_display_name}":', ""]
+    lines.extend(results)
+    if truncated:
+        lines.append(f"\n(Showing first {_MAX_BATCH_FILES} files; remaining files were skipped)")
+    lines.append("")
+    lines.append('Use get_learning_plan(topic_name="...") to view details.')
+
+    return "\n".join(lines)
+
+
 async def generate_learning_plan(
     source_name: str,
     query: str | None = None,
-    collection_name: str | list[str] | None = None,
+    collection_name: str = "",
+    force: bool = False,
 ) -> str:
     """Generate a structured learning plan from an uploaded document.
 
     Fail Soft: all errors return error strings, never raise.
     """
     start_time = time.monotonic()
-    logger.info("generate_learning_plan start source=%s", source_name)
+    logger.info("generate_learning_plan start source=%s force=%s", source_name, force)
 
     try:
         # 1. Normalize name
@@ -204,32 +587,118 @@ async def generate_learning_plan(
         if not normalized_name:
             return "Error: source_name is empty. Hint: Provide the name of the book or document."
 
-        # 2-4. Idempotency check
+        # 2. Resolve collection name -> UUID
+        collection_display_name = ""
+        resolved_id = await _resolve_collection_name_to_id(collection_name)
+        if resolved_id:
+            logger.info(
+                "generate_learning_plan: resolved name=%s -> id=%s",
+                collection_name, resolved_id,
+            )
+            collection_display_name = collection_name
+            collection_name = resolved_id
+        else:
+            # Not a known name — might already be a UUID, pass through
+            logger.info(
+                "generate_learning_plan: collection_name=%s "
+                "not found by name, using as-is",
+                collection_name,
+            )
+
+        # 3. Multi-doc detection — check files in collection
+        collection_uuid = collection_name
+        if collection_uuid:
+            files = await _fetch_collection_files(collection_uuid)
+
+            # Fail Soft: files API failure -> explicit error (no fallback to mixed RAG)
+            if isinstance(files, str):
+                return (
+                    "Error: Cannot list documents in this collection — "
+                    "per-document plan generation is temporarily unavailable. "
+                    "Hint: Retry later or check Open WebUI files endpoint availability."
+                )
+
+            filenames = _extract_filenames(files)
+
+            if not filenames:
+                return (
+                    "Error: No documents found in this collection. "
+                    "Hint: Upload documents to the knowledge base in Open WebUI first."
+                )
+
+            if len(filenames) > 1:
+                # Multi-doc collection
+                matched = _match_filename(source_name, filenames)
+                if isinstance(matched, list):
+                    # Ambiguous match
+                    return _format_ambiguous_matches(source_name, matched)
+                elif isinstance(matched, str):
+                    # Single file match — generate for that file only
+                    result = await _generate_plan_for_file(
+                        matched, collection_uuid, query, force
+                    )
+                    if result == "skip_existing":
+                        clean = _clean_filename(matched)
+                        async with async_session_factory() as session:
+                            existing = await _find_existing_topic(session, clean)
+                            if existing:
+                                plan_text = await _resolve_plan_display(existing, session)
+                                return (
+                                    f"Learning plan for '{clean}' already exists:\n"
+                                    f"{plan_text}\n"
+                                    f"Use get_learning_plan to view details."
+                                )
+                        return f"Learning plan for '{clean}' already exists."
+                    elif result == "insufficient_chunks":
+                        return (
+                            f"Error: Insufficient content found for '{matched}' in the collection. "
+                            "Hint: The document may not have enough indexed content."
+                        )
+                    elif result.startswith("ok:"):
+                        clean = _clean_filename(matched)
+                        elapsed = time.monotonic() - start_time
+                        logger.info("generate_learning_plan single-file done file=%s elapsed=%.1fs", matched, elapsed)
+                        async with async_session_factory() as session:
+                            topic = await _find_existing_topic(session, clean)
+                            if topic:
+                                return await _resolve_plan_display(topic, session, status="Plan created")
+                        return _format_plan(clean, [], status="Plan created")
+                    else:
+                        return result  # error string
+                else:
+                    # No match — batch mode for all files
+                    return await _generate_plans_batch(
+                        filenames, collection_uuid, query, force,
+                        collection_display_name or collection_uuid,
+                    )
+            # Single file or empty — fall through to single-doc behavior
+
+        # 4. Single-doc idempotency check
+        old_topic_id = None
         async with async_session_factory() as session:
-            existing = await graph_service.get_topic_by_name(session, normalized_name)
-            if existing is None:
-                # Also try case-insensitive match
-                all_topics = await graph_service.get_all_topics(session)
-                for t in all_topics:
-                    if t["name"].strip().lower() == normalized_name.lower():
-                        existing = t
-                        break
+            existing = await _find_existing_topic(session, normalized_name)
 
             if existing is not None:
-                concepts = await graph_service.get_concepts_by_topic(session, existing["id"])
-                plan_text = _format_plan_from_db(existing["name"], concepts)
+                if not force:
+                    plan_text = await _resolve_plan_display(existing, session)
+                    logger.info(
+                        "generate_learning_plan idempotent hit source=%s topic_id=%d",
+                        source_name,
+                        existing["id"],
+                    )
+                    return (
+                        f"Learning plan for '{source_name}' already exists:\n"
+                        f"{plan_text}\n"
+                        f"Use get_learning_plan to view details."
+                    )
+                # force=True: record old topic for later replacement
+                old_topic_id = existing["id"]
                 logger.info(
-                    "generate_learning_plan idempotent hit source=%s topic_id=%d",
-                    source_name,
-                    existing["id"],
-                )
-                return (
-                    f"Learning plan for '{source_name}' already exists:\n"
-                    f"{plan_text}\n"
-                    f"Use get_learning_plan to view details."
+                    "generate_learning_plan force=True, will replace topic_id=%d",
+                    old_topic_id,
                 )
 
-        # 5. RAG retrieval
+        # 5. RAG retrieval (single-doc path)
         search_query = query or f"table of contents overview introduction chapters {source_name}"
         toc_text = await search_knowledge_base(
             query=search_query,
@@ -246,86 +715,25 @@ async def generate_learning_plan(
 
         logger.info("generate_learning_plan rag_result len=%d", len(toc_text))
 
-        # Truncate if too long
-        if len(toc_text) > _RAG_TEXT_MAX_LENGTH:
-            toc_text = toc_text[:_RAG_TEXT_MAX_LENGTH] + "\n[truncated]"
-
-        # 7. LLM analysis (with sub-step timeout)
-        prompt = TOC_ANALYSIS_PROMPT.format(toc_content=toc_text)
-        try:
-            plan_json = await asyncio.wait_for(
-                get_chat_completion(
-                    messages=[{"role": "user", "content": prompt}],
-                    max_tokens=2000,
-                ),
-                timeout=_LLM_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("generate_learning_plan failed stage=llm source=%s error=timeout(%ds)", source_name, _LLM_TIMEOUT_SECONDS)
-            return (
-                "Error: LLM analysis timed out. "
-                "Hint: The service may be busy — please try again in a moment."
-            )
-
-        if plan_json.startswith("Error"):
-            logger.warning("generate_learning_plan failed stage=llm source=%s error=%s", source_name, plan_json)
-            return (
-                "Error: Failed to analyze document structure. "
-                "Hint: The document may not have a clear table of contents. Try providing a custom query."
-            )
-
-        # 9. Parse and validate
-        parsed = _parse_and_validate_plan(plan_json)
+        # 6. LLM analysis
+        parsed = await _run_llm_analysis(toc_text)
         if isinstance(parsed, str):
-            logger.warning("generate_learning_plan failed stage=parse source=%s error=%s", source_name, parsed)
-            if "Validation" in parsed:
-                detail = parsed.split("—", 1)[-1].strip() if "—" in parsed else parsed
-                return (
-                    f"Error: Extracted structure is invalid ({detail}). "
-                    "Hint: Try again or provide a custom query to help the LLM find better content."
-                )
-            return (
-                "Error: Could not parse the chapter structure from LLM response. "
-                "Hint: Try again — LLM output varies between calls."
-            )
+            logger.warning("generate_learning_plan failed stage=llm/parse source=%s error=%s", source_name, parsed)
+            return parsed
 
-        # 11-22. Atomic write to DB
+        # 7. Atomic write to DB (build-then-replace for force)
         async with async_session_factory() as session:
             try:
-                topic = await graph_service.add_topic(
-                    session,
-                    normalized_name,
-                    source_material=normalized_name,
-                    auto_commit=False,
+                await _write_plan_to_db(
+                    session, normalized_name, parsed, old_topic_id=old_topic_id
                 )
-
-                total_concepts = 0
-                ch_count = len(parsed)
-                for ch in parsed:
-                    await graph_service.add_concept(
-                        session,
-                        ch["chapter"],
-                        topic_id=topic["id"],
-                        auto_commit=False,
-                    )
-                    total_concepts += 1
-                    for sec in ch.get("sections", []):
-                        await graph_service.add_concept(
-                            session,
-                            sec,
-                            topic_id=topic["id"],
-                            auto_commit=False,
-                        )
-                        total_concepts += 1
-
                 await session.commit()
                 await graph_service.load_graph(session)
 
                 elapsed = time.monotonic() - start_time
                 logger.info(
-                    "generate_learning_plan stored topic_id=%d concepts=%d elapsed=%.1fs",
-                    topic["id"],
-                    total_concepts,
+                    "generate_learning_plan stored source=%s elapsed=%.1fs",
+                    source_name,
                     elapsed,
                 )
 
@@ -338,7 +746,10 @@ async def generate_learning_plan(
                     source_name,
                     exc,
                 )
-                return "Error: Failed to save learning plan to database. Hint: This is an internal error — please try again."
+                return (
+                    "Error: Failed to save learning plan to database. "
+                    "Hint: This is an internal error — please try again."
+                )
 
     except Exception as exc:
         logger.warning("generate_learning_plan failed stage=unexpected source=%s error=%s", source_name, exc)
@@ -355,15 +766,7 @@ async def get_learning_plan(topic_name: str | None = None) -> str:
             if topic_name:
                 # Find specific topic
                 normalized = _normalize_name(topic_name)
-                topic = await graph_service.get_topic_by_name(session, normalized)
-
-                # Case-insensitive fallback
-                if topic is None:
-                    all_topics = await graph_service.get_all_topics(session)
-                    for t in all_topics:
-                        if t["name"].strip().lower() == normalized.lower():
-                            topic = t
-                            break
+                topic = await _find_existing_topic(session, normalized)
 
                 if topic is None:
                     return (
@@ -372,11 +775,7 @@ async def get_learning_plan(topic_name: str | None = None) -> str:
                         "or call get_learning_plan without arguments to see all plans."
                     )
 
-                concepts = await graph_service.get_concepts_by_topic(session, topic["id"])
-                if not concepts:
-                    return f"Learning plan '{topic['name']}' exists but has no concepts yet."
-
-                return _format_plan_from_db(topic["name"], concepts)
+                return await _resolve_plan_display(topic, session)
 
             else:
                 # List all topics with concept counts

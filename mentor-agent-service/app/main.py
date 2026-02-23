@@ -1,4 +1,5 @@
 import logging
+import subprocess
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -10,9 +11,17 @@ logging.getLogger("app").setLevel(logging.INFO)
 from app.dependencies import verify_api_key
 from app.routers import chat, health
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Run Alembic migrations on startup (idempotent — already-applied revisions are skipped)
+    try:
+        subprocess.run(["alembic", "upgrade", "head"], check=True)
+        logger.info("Database migrations applied successfully")
+    except Exception as exc:
+        logger.error("Failed to run database migrations: %s", exc)
     yield
 
 

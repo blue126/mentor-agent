@@ -144,7 +144,7 @@ async def test_search_generic_exception():
     with patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client):
         result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
-    assert "Error: search_knowledge_base failed:" in result
+    assert "failed:" in result
     assert "unexpected" in result
 
 
@@ -229,7 +229,7 @@ async def test_search_malformed_response_empty_outer_list():
     assert "No relevant content found" in result
 
 
-# Test 10: collection_names empty — auto-discovers from list_knowledge_bases API
+# Test 10: collection_names empty — auto-discovers from list_collections API
 async def test_search_no_collection_names_auto_discovers(monkeypatch):
     from app.tools.search_knowledge_base_tool import search_knowledge_base
 
@@ -245,7 +245,7 @@ async def test_search_no_collection_names_auto_discovers(monkeypatch):
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
-    # First call: GET list_knowledge_bases (auto-discover), second call: POST search
+    # First call: GET list_collections (auto-discover), second call: POST search
     mock_client.get = AsyncMock(return_value=_ok_response(kb_items))
     mock_client.post = AsyncMock(return_value=_ok_response(search_data))
 
@@ -363,7 +363,7 @@ async def test_search_non_dict_metadata_non_float_score():
         result = await search_knowledge_base(query="test", collection_name=["col-1"])
 
     assert "[Source: unknown source]" in result
-    assert "(score: N/A)" in result
+    assert "(score: 0.0000)" in result
     assert "some text" in result
 
 
@@ -432,3 +432,56 @@ async def test_search_malicious_text_with_boundary_token():
     # Both docs should be present
     assert "normal text" in result
     assert "do evil" in result  # text is present but contained within boundary
+
+
+# Test: name→UUID resolution — human-readable name resolved before search
+async def test_search_resolves_name_to_uuid():
+    from app.tools.search_knowledge_base_tool import search_knowledge_base
+
+    data = {"documents": [["resolved content"]], "metadatas": [[{"name": "book.pdf"}]], "distances": [[0.9]]}
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=_ok_response(data))
+
+    with (
+        patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client),
+        patch(
+            "app.tools.search_knowledge_base_tool._resolve_collection_name_to_id",
+            new_callable=AsyncMock,
+            return_value="uuid-abc-123",
+        ) as mock_resolve,
+    ):
+        result = await search_knowledge_base(query="test", collection_name="AI-Assisted Programming")
+
+    # Verify resolution was called with the human-readable name
+    mock_resolve.assert_called_once_with("AI-Assisted Programming")
+    # Verify search was called with the resolved UUID, not the name
+    call_kwargs = mock_client.post.call_args[1]["json"]
+    assert call_kwargs["collection_names"] == ["uuid-abc-123"]
+    assert "resolved content" in result
+
+
+# Test: name→UUID resolution failure — name passes through as-is
+async def test_search_resolution_failure_passes_through():
+    from app.tools.search_knowledge_base_tool import search_knowledge_base
+
+    data = {"documents": [[]], "metadatas": [[]], "distances": [[]]}
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=_ok_response(data))
+
+    with (
+        patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_client),
+        patch(
+            "app.tools.search_knowledge_base_tool._resolve_collection_name_to_id",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        await search_knowledge_base(query="test", collection_name="unknown-name")
+
+    # Name passes through when resolution returns None
+    call_kwargs = mock_client.post.call_args[1]["json"]
+    assert call_kwargs["collection_names"] == ["unknown-name"]

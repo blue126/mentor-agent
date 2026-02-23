@@ -23,7 +23,9 @@ def _run_migrations_on_fresh_db() -> dict[str, list[str]]:
 
     with patch("app.config.settings") as mock_settings:
         mock_settings.database_url = db_url
-        cfg = Config(str(Path(__file__).resolve().parents[2] / "alembic.ini"))
+        service_root = Path(__file__).resolve().parents[2]
+        cfg = Config(str(service_root / "alembic.ini"))
+        cfg.set_main_option("script_location", str(service_root / "alembic"))
         command.upgrade(cfg, "head")
 
     conn = sqlite3.connect(db_path)

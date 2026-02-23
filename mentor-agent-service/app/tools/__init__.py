@@ -4,7 +4,7 @@ from app.tools.echo_tool import echo
 from app.tools.extract_relationships_tool import extract_concept_relationships
 from app.tools.learning_plan_tool import generate_learning_plan, get_learning_plan
 from app.tools.registry import ToolRegistry
-from app.tools.search_knowledge_base_tool import list_knowledge_bases, search_knowledge_base
+from app.tools.search_knowledge_base_tool import list_collections, search_knowledge_base
 
 registry = ToolRegistry()
 
@@ -53,6 +53,14 @@ registry.register(
                         "more context (e.g., include chapter names, section titles, or synonyms)."
                     ),
                 },
+                "collection_name": {
+                    "type": "string",
+                    "description": (
+                        "Optional: the name of the knowledge base to search (e.g. 'AI-Assisted Programming'). "
+                        "Use list_collections to see available names. "
+                        "If not provided, searches all knowledge bases."
+                    ),
+                },
                 "k": {
                     "type": "integer",
                     "description": "Number of top results to return (default: 8)",
@@ -64,14 +72,14 @@ registry.register(
     },
 )
 
-# Register list_knowledge_bases tool
+# Register list_collections tool
 registry.register(
-    name="list_knowledge_bases",
-    func=list_knowledge_bases,
+    name="list_collections",
+    func=list_collections,
     schema={
         "description": (
-            "List all available knowledge bases (uploaded document collections). "
-            "Use this to discover which collections are available before searching."
+            "List all available collections and their documents. "
+            "Returns collection names with document filenames."
         ),
         "parameters": {
             "type": "object",
@@ -106,8 +114,23 @@ registry.register(
                         "If not provided, a default query targeting the TOC will be used."
                     ),
                 },
+                "collection_name": {
+                    "type": "string",
+                    "description": (
+                        "The name of the knowledge base to use (e.g. 'AI-Assisted Programming'). "
+                        "Use list_collections to find available collection names."
+                    ),
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": (
+                        "Set to true to delete an existing learning plan and regenerate it. "
+                        "Use when the previous plan was incorrect or needs updating."
+                    ),
+                    "default": False,
+                },
             },
-            "required": ["source_name"],
+            "required": ["source_name", "collection_name"],
         },
     },
 )
@@ -119,8 +142,10 @@ registry.register(
     schema={
         "description": (
             "Retrieve existing learning plans from the knowledge graph. "
-            "Use this when the user asks 'What's next?', 'Show my learning plan', or wants to review their study progress. "
-            "Without a topic_name, lists all available plans. With a topic_name, shows the detailed chapter/section structure."
+            "Use this when the user asks 'What's next?', 'Show my learning plan', "
+            "or wants to review their study progress. "
+            "Without a topic_name, lists all available plans. "
+            "With a topic_name, shows the detailed chapter/section structure."
         ),
         "parameters": {
             "type": "object",

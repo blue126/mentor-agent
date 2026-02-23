@@ -37,6 +37,17 @@ async def _inject_system_prompt(messages: list[dict[str, Any]]) -> None:
         messages.insert(0, system_msg)
 
 
+# Common LLM parameter name aliases → canonical schema names.
+# LLMs sometimes use intuitive but non-schema param names; this map
+# rescues those calls instead of silently dropping the arguments.
+_PARAM_ALIASES: dict[str, str] = {
+    "topic_name": "source_name",
+    "book_name": "source_name",
+    "knowledge_base_id": "collection_name",
+    "kb_id": "collection_name",
+}
+
+
 async def _execute_tool(fn_name: str, fn_args_raw: str) -> str:
     """Execute a single tool call with Fail Soft error handling."""
     # Parse arguments (Fail Soft on malformed JSON)
@@ -52,7 +63,9 @@ async def _execute_tool(fn_name: str, fn_args_raw: str) -> str:
         return f"Error: Unknown tool '{fn_name}'. Available tools: [{available}]"
 
     # Filter args to schema-defined parameters only (prevent LLM-hallucinated params
-    # from reaching the function and bypassing auto-discover / default logic)
+    # from reaching the function and bypassing auto-discover / default logic).
+    # Also applies alias mapping: if LLM uses a known alias (e.g. "topic_name")
+    # for a schema param (e.g. "source_name"), remap instead of dropping.
     tool_schema = registry.get_schema(fn_name)
     schema_params: set[str] | None = None
     if isinstance(tool_schema, dict):
@@ -62,7 +75,16 @@ async def _execute_tool(fn_name: str, fn_args_raw: str) -> str:
             if isinstance(prop_keys, dict) and prop_keys:
                 schema_params = set(prop_keys.keys())
     if schema_params is not None:
-        fn_args = {k: v for k, v in fn_args.items() if k in schema_params}
+        resolved: dict[str, Any] = {}
+        for k, v in fn_args.items():
+            if k in schema_params:
+                resolved[k] = v
+            elif k in _PARAM_ALIASES:
+                canonical = _PARAM_ALIASES[k]
+                if canonical in schema_params and canonical not in resolved and canonical not in fn_args:
+                    logger.info("_execute_tool alias: %s → %s for tool %s", k, canonical, fn_name)
+                    resolved[canonical] = v
+        fn_args = resolved
 
     # Execute tool (Fail Soft on exceptions)
     try:

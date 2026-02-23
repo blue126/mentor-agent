@@ -504,3 +504,80 @@ class TestRunAgentLoopStreaming:
         # Two LLM calls
         assert mock_llm.stream_chat_completion.call_count == 2
         assert "data: [DONE]" in event_text
+
+
+class TestExecuteToolParamAlias:
+    """Tests for _execute_tool parameter alias mapping."""
+
+    @patch("app.services.agent_service.registry")
+    async def test_alias_maps_topic_name_to_source_name(self, mock_registry):
+        """LLM sends topic_name → mapped to source_name before calling tool."""
+        from app.services.agent_service import _execute_tool
+
+        mock_func = AsyncMock(return_value="plan created")
+        mock_registry.get_tool.return_value = mock_func
+        mock_registry.get_schema.return_value = {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_name": {"type": "string"},
+                    "collection_name": {"type": "string"},
+                },
+            },
+        }
+
+        result = await _execute_tool(
+            "generate_learning_plan",
+            '{"topic_name": "AI Book", "knowledge_base_id": "kb-123"}',
+        )
+
+        assert result == "plan created"
+        mock_func.assert_called_once_with(source_name="AI Book", collection_name="kb-123")
+
+    @patch("app.services.agent_service.registry")
+    async def test_alias_does_not_override_explicit_param(self, mock_registry):
+        """If LLM sends both source_name AND topic_name, source_name wins."""
+        from app.services.agent_service import _execute_tool
+
+        mock_func = AsyncMock(return_value="ok")
+        mock_registry.get_tool.return_value = mock_func
+        mock_registry.get_schema.return_value = {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_name": {"type": "string"},
+                },
+            },
+        }
+
+        result = await _execute_tool(
+            "generate_learning_plan",
+            '{"source_name": "Correct Name", "topic_name": "Wrong Name"}',
+        )
+
+        assert result == "ok"
+        mock_func.assert_called_once_with(source_name="Correct Name")
+
+    @patch("app.services.agent_service.registry")
+    async def test_unknown_params_still_dropped(self, mock_registry):
+        """Params with no alias and not in schema are silently dropped."""
+        from app.services.agent_service import _execute_tool
+
+        mock_func = AsyncMock(return_value="ok")
+        mock_registry.get_tool.return_value = mock_func
+        mock_registry.get_schema.return_value = {
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source_name": {"type": "string"},
+                },
+            },
+        }
+
+        result = await _execute_tool(
+            "generate_learning_plan",
+            '{"source_name": "Book", "totally_fake_param": "junk"}',
+        )
+
+        assert result == "ok"
+        mock_func.assert_called_once_with(source_name="Book")

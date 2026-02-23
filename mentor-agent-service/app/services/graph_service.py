@@ -96,6 +96,24 @@ async def get_edges_for_concepts(session: AsyncSession, concept_ids: list[int]) 
     return await repo.get_edges_for_concepts(concept_ids)
 
 
+async def delete_topic_cascade(
+    session: AsyncSession,
+    topic_id: int,
+    *,
+    auto_commit: bool = True,
+) -> None:
+    """Delete topic and all its concepts + edges via cascade.
+
+    When auto_commit=False, caller must commit/rollback.
+    """
+    repo = GraphRepository(session)
+    await repo.delete_topic_cascade(topic_id)
+    if auto_commit:
+        await session.commit()
+        # Rebuild in-memory graph after deletion
+        await load_graph(session)
+
+
 async def add_topic(
     session: AsyncSession,
     name: str,

@@ -5,6 +5,7 @@ key persona directives, for both stream=false and stream=true paths.
 """
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import ASGITransport, AsyncClient
@@ -13,6 +14,8 @@ from app.main import create_app
 from tests.test_doubles import MockChunk
 
 _VALID_TOKEN = "test-secret-key"
+_SERVICE_ROOT = Path(__file__).resolve().parents[2]
+_SYSTEM_PROMPT_PATH = str(_SERVICE_ROOT / "app" / "prompts" / "mentor_system_prompt.md")
 _MESSAGES_PAYLOAD = {"messages": [{"role": "user", "content": "Hello"}], "model": "test-model"}
 
 # Key directives that MUST appear in the system prompt
@@ -82,8 +85,11 @@ async def test_non_streaming_includes_persona_directives():
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.services.prompt_service.settings") as mock_prompt_settings,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
+        mock_prompt_settings.mentor_mode_enabled = True
+        mock_prompt_settings.system_prompt_path = _SYSTEM_PROMPT_PATH
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)
 
         async with ac:
@@ -118,8 +124,11 @@ async def test_streaming_includes_persona_directives():
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.agent_service.litellm") as mock_agent_litellm,
+        patch("app.services.prompt_service.settings") as mock_prompt_settings,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
+        mock_prompt_settings.mentor_mode_enabled = True
+        mock_prompt_settings.system_prompt_path = _SYSTEM_PROMPT_PATH
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
         mock_agent_litellm.stream_chunk_builder = MagicMock(
             return_value=text_resp

@@ -19,9 +19,9 @@ def test_search_knowledge_base_registered():
     assert tool is not None
 
 
-# Test 2: list_knowledge_bases registered in registry
-def test_list_knowledge_bases_registered():
-    tool = registry.get_tool("list_knowledge_bases")
+# Test 2: list_collections registered in registry
+def test_list_collections_registered():
+    tool = registry.get_tool("list_collections")
     assert tool is not None
 
 
@@ -30,18 +30,18 @@ def test_rag_tools_schemas_complete():
     schemas = registry.get_all_schemas()
     tool_names = [s["function"]["name"] for s in schemas]
     assert "search_knowledge_base" in tool_names
-    assert "list_knowledge_bases" in tool_names
+    assert "list_collections" in tool_names
 
     # Validate search_knowledge_base schema
     search_schema = next(s for s in schemas if s["function"]["name"] == "search_knowledge_base")
     assert "query" in search_schema["function"]["parameters"]["properties"]
-    # collection_name removed from schema (auto-discover only); k remains
-    assert "collection_name" not in search_schema["function"]["parameters"]["properties"]
+    # collection_name re-added to schema (name→UUID resolution); k remains
+    assert "collection_name" in search_schema["function"]["parameters"]["properties"]
     assert "k" in search_schema["function"]["parameters"]["properties"]
     assert search_schema["function"]["parameters"]["required"] == ["query"]
 
-    # Validate list_knowledge_bases schema
-    list_schema = next(s for s in schemas if s["function"]["name"] == "list_knowledge_bases")
+    # Validate list_collections schema
+    list_schema = next(s for s in schemas if s["function"]["name"] == "list_collections")
     assert list_schema["function"]["parameters"]["required"] == []
 
 
@@ -105,8 +105,12 @@ async def test_agent_loop_rag_tool_use():
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.agent_service.litellm") as mock_agent_litellm,
         patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_httpx_client),
+        patch("app.tools.search_knowledge_base_tool.settings") as mock_tool_settings,
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
+        mock_tool_settings.openwebui_api_key = "test-webui-key"
+        mock_tool_settings.openwebui_base_url = "http://open-webui:8080"
+        mock_tool_settings.openwebui_default_collection_names = ""
         mock_litellm.acompletion = AsyncMock(side_effect=_llm_side_effect)
         mock_agent_litellm.stream_chunk_builder = MagicMock(
             side_effect=[tool_resp, text_resp]

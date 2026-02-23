@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import insert, or_, select
+from sqlalchemy import delete, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Concept, ConceptEdge, Topic
@@ -212,6 +212,31 @@ class GraphRepository:
             }
             for row in result.scalars().all()
         ]
+
+    async def delete_topic_cascade(self, topic_id: int) -> None:
+        """Delete topic and all its concepts + edges.
+
+        Order: edges (any involving this topic's concepts) → concepts → topic.
+        Uses OR: deletes all edges where source OR target belongs to this topic.
+        This avoids dangling edge references after concepts are deleted.
+        """
+        concept_ids = [c["id"] for c in await self.get_concepts_by_topic(topic_id)]
+        if concept_ids:
+            await self._session.execute(
+                delete(ConceptEdge).where(
+                    or_(
+                        ConceptEdge.source_concept_id.in_(concept_ids),
+                        ConceptEdge.target_concept_id.in_(concept_ids),
+                    )
+                )
+            )
+            await self._session.execute(
+                delete(Concept).where(Concept.topic_id == topic_id)
+            )
+        await self._session.execute(
+            delete(Topic).where(Topic.id == topic_id)
+        )
+        await self._session.flush()
 
     async def get_all_edges(self) -> list[dict]:
         """Return all edges."""

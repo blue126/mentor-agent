@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 from app.services import graph_service
 
-
 _VALID_PLAN_JSON = json.dumps([
     {"chapter": "1. Introduction", "sections": ["1.1 Getting Started", "1.2 Basic Concepts"]},
     {"chapter": "2. Core Topics", "sections": ["2.1 Topic A", "2.2 Topic B"]},
@@ -27,9 +26,13 @@ class _FakeSessionContext:
 
 @patch("app.tools.learning_plan_tool.get_chat_completion")
 @patch("app.tools.learning_plan_tool.search_knowledge_base")
-async def test_generate_learning_plan_full_flow(mock_rag, mock_llm, db_session):
+@patch("app.tools.learning_plan_tool._fetch_collection_files")
+@patch("app.tools.learning_plan_tool._resolve_collection_name_to_id")
+async def test_generate_learning_plan_full_flow(mock_resolve, mock_files, mock_rag, mock_llm, db_session):
     """Full flow: mock RAG + LLM → verify Topic and Concepts written to real DB + NetworkX."""
     graph_service.reset_graph()
+    mock_resolve.return_value = "test-kb-id"
+    mock_files.return_value = [{"filename": "Test Integration Book.pdf"}]
     mock_rag.return_value = "Chapter 1: Intro\n1.1 Start\nChapter 2: Core\n2.1 Deep"
     mock_llm.return_value = _VALID_PLAN_JSON
 
@@ -39,7 +42,7 @@ async def test_generate_learning_plan_full_flow(mock_rag, mock_llm, db_session):
     ):
         from app.tools.learning_plan_tool import generate_learning_plan
 
-        result = await generate_learning_plan("Test Integration Book")
+        result = await generate_learning_plan("Test Integration Book", collection_name="Test KB")
 
     # Verify output format
     assert "Learning Plan: Test Integration Book" in result
@@ -63,9 +66,9 @@ async def test_generate_learning_plan_full_flow(mock_rag, mock_llm, db_session):
     assert "2.2 Topic B" in concept_names
 
     # Verify NetworkX graph has the concepts
-    G = graph_service._digraph
-    assert G is not None
-    assert G.number_of_nodes() >= 6
+    digraph = graph_service._digraph
+    assert digraph is not None
+    assert digraph.number_of_nodes() >= 6
 
     graph_service.reset_graph()
 
@@ -99,9 +102,13 @@ async def test_get_learning_plan_with_real_db(db_session):
 
 @patch("app.tools.learning_plan_tool.get_chat_completion")
 @patch("app.tools.learning_plan_tool.search_knowledge_base")
-async def test_atomic_rollback_no_residual_data(mock_rag, mock_llm, db_session):
+@patch("app.tools.learning_plan_tool._fetch_collection_files")
+@patch("app.tools.learning_plan_tool._resolve_collection_name_to_id")
+async def test_atomic_rollback_no_residual_data(mock_resolve, mock_files, mock_rag, mock_llm, db_session):
     """Partial write failure → DB should have no residual data."""
     graph_service.reset_graph()
+    mock_resolve.return_value = "test-kb-id"
+    mock_files.return_value = [{"filename": "Rollback Test Book.pdf"}]
     mock_rag.return_value = "Some content"
     mock_llm.return_value = _VALID_PLAN_JSON
 
@@ -122,7 +129,7 @@ async def test_atomic_rollback_no_residual_data(mock_rag, mock_llm, db_session):
         with patch.object(db_session, "flush", side_effect=_failing_flush):
             from app.tools.learning_plan_tool import generate_learning_plan
 
-            result = await generate_learning_plan("Rollback Test Book")
+            result = await generate_learning_plan("Rollback Test Book", collection_name="Test KB")
 
     assert "Error" in result
 
