@@ -137,7 +137,7 @@ curl -sS http://127.0.0.1:8100/v1/models -H "Authorization: Bearer dev-token"
   ```bash
   python -m pytest \
     tests/unit/test_search_knowledge_base.py \
-    tests/unit/test_list_knowledge_bases.py \
+    tests/unit/test_list_collections.py \
     tests/unit/test_graph_repo.py \
     tests/unit/test_graph_service.py \
     tests/unit/test_learning_plan_tool.py \

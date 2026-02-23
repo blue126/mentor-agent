@@ -24,7 +24,7 @@
 
 - `get_learning_progress`（文档有“进度可查询”诉求，但未独立定义工具）
 - `update_learning_progress`（文档有 mastery 更新规则，但未独立定义工具）
-- `list_knowledge_bases`（代码中已存在，但规划文档未作为明确能力项）
+- `list_collections`（代码中已存在，但规划文档未作为明确能力项）
 
 ### 3) 当前设计未覆盖（建议补入）
 
@@ -52,4 +52,4 @@
 1. 优先补 `get_current_datetime` / `convert_timezone`。
 2. 补 `web_search` + `fetch_url`（附超时/限流/Fail Soft 约束）。
 3. 将 `get_learning_progress` / `update_learning_progress` 显式化为工具接口。
-4. 在 Epic/PRD 中补 `list_knowledge_bases` 的设计条目，保持“设计-实现”一致。
+4. 在 Epic/PRD 中补 `list_collections` 的设计条目，保持“设计-实现”一致。

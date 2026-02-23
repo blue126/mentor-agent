@@ -1,6 +1,6 @@
 # Epic 2 人工验证测试报告（Open WebUI）
 
-日期: 2026-02-21
+日期: 2026-02-22
 测试依据: `docs/testing/plans/testing-plan-epic2.md` v2.0
 测试环境: macOS + Docker + devcontainer/VS Code Port Forward
 模型: openai/claude-sonnet-4-6（via claude-max-proxy, subscription profile）
@@ -16,16 +16,16 @@
 |---|---|---|
 | Step 1 RAG 基础检索 | **通过**（R8 + 3 轮复测） | R1-4: double-response；R5: Buffer 通过；R6: OAuth+422 通过；R7: auto-discover 通过；R8: 搜索相关性改进后通过；Issue #12-14 修复后 3 轮复测一致通过 |
 | Step 2 RAG 连续追问 | **通过**（3 轮复测） | 上下文连续、资料约束保持；Issue #12 修复后无工具调用错误 |
-| Step 3 学习计划生成 | 未测 | |
-| Step 4 学习计划可追问性 | 未测 | |
-| Step 5 关系抽取 | 未测 | |
-| Step 5.5 关系抽取幂等性 | 未测 | |
-| Step 6 关系可用性验证 | 未测 | |
-| Step 7 Fail Soft | 未测 | |
-| Step 8 Epic 2 相关测试集 | 未测 | |
-| Step 9 全量回归 | 未测 | |
-| Step 10 数据落库抽检 | 未测 | |
-| Step 11 计划与关系数据抽检 | 未测 | |
+| Step 3 学习计划生成 | **部分通过** | 生成+持久化成功；`get_learning_plan` 层级重建与原始计划不一致（Issue #16） |
+| Step 4 学习计划可追问性 | **通过** | 基于已生成计划追问 next step，回答合理 |
+| Step 5 关系抽取 | **通过** | 关系抽取触发成功，返回 prerequisite/related |
+| Step 5.5 关系抽取幂等性 | **通过** | AC#7 去重幂等满足（32 跳过，10 新增） |
+| Step 6 关系可用性验证 | **通过** | |
+| Step 7 Fail Soft | **未通过**（建议项，非阻塞） | TD-009: LLM 未告知 RAG 检索失败 |
+| Step 8 Epic 2 相关测试集 | **通过** | 152 passed |
+| Step 9 全量回归 | **通过** | 243 passed |
+| Step 10 数据落库抽检 | **通过** | 3 张表结构与设计一致 |
+| Step 11 计划与关系数据抽检 | **通过** | topics=1, concepts=31, edges=61 |
 
 ## 3. 分步骤测试与排障记录
 
@@ -367,6 +367,137 @@
 
 ---
 
+### Step 3: 学习计划生成
+
+---
+
+#### Round 1（失败 — 数据库表未创建）
+
+- 测试输入: `请根据我上传的资料生成学习计划，按 chapter/sections 结构输出。`
+- 上传文档: Python Crash Course, 3rd Edition（PDF）
+
+- 结果:
+  - Agent 调用 `generate_learning_plan`，返回错误（`no such table: topics`）
+  - 工具幂等性检查（`get_topic_by_name`）即刻失败 — RAG 检索和 LLM 分析**未执行**
+  - LLM 收到错误后自行用 `search_knowledge_base` 检索结果合成了一份学习计划
+  - LLM 向用户说明："工具因数据库未初始化而暂时无法持久化保存学习计划"
+  - 学习计划内容正确（来自 RAG 检索），但**未持久化到数据库**
+
+- 根因: **设计遗漏** — Dockerfile 和 FastAPI lifespan 均无自动 migration。
+  - Dockerfile CMD 只启动 uvicorn，不执行 `alembic upgrade head`
+  - `main.py` lifespan 为空（`yield` 前无任何初始化逻辑）
+  - 设计文档中所有涉及 DB 的 AC 都写 "Given Alembic migration 已运行"（假设手动执行）
+  - 开发测试时总是手动 `docker compose exec agent-service alembic upgrade head`，未暴露问题
+  - 见 Issue #15
+
+- 判定（Round 1）: **失败**（数据未持久化）。
+
+---
+
+#### Round 2（通过 — auto-migration 修复后生成+持久化成功）
+
+- 修复清单（Round 1 → 2 之间）:
+  1. Issue #15: `main.py` lifespan 增加 `subprocess.run(["alembic", "upgrade", "head"])` — 启动时自动建表
+
+- 容器重建: `docker compose up -d --build agent-service`
+
+- **测试**:
+  - 测试输入: `请根据我上传的资料生成学习计划，按 chapter/sections 结构输出。`
+  - 容器日志确认:
+    ```
+    INFO:app.main:Database migrations applied successfully
+    ```
+  - 第一次 `generate_learning_plan` 调用:
+    - LLM 幻觉了 `knowledge_base_id` 和 `topic_name` 参数（schema 中不存在）
+    - schema-based arg filtering 正确过滤后缺少必填 `source_name` → 返回参数错误
+    - 错误消息引导 LLM 使用正确参数名
+    - **Issue #13 的 schema 过滤机制正常工作**
+  - 第二次 `generate_learning_plan` 调用:
+    - LLM 使用正确参数 `source_name` + `query` 重试
+    - RAG 检索成功（`rag_result len=7459`）
+    - LLM 分析成功 → 解析成功 → **DB 写入成功**
+    ```
+    INFO:app.tools.learning_plan_tool:generate_learning_plan stored topic_id=1 concepts=33 elapsed=5.4s
+    ```
+  - LLM 输出格式化学习计划: 11 章基础 + 3 个项目（Alien Invasion / Data Visualization / Django Web App）
+  - 通过条件对照:
+    - ✅ "返回格式化的学习计划文本，包含 Topic 和 Concept 层级结构"
+    - ✅ "至少包含 chapter + sections 层级"
+    - ✅ "结构可读且与文档目录语义大致一致"
+
+- **持久化验证**（新会话）:
+  - 输入: `查看我现有的学习计划`
+  - `get_learning_plan` 返回 1 个计划: `Python Crash Course (3rd Edition)`, 33 concepts
+  - ✅ 数据成功持久化到 DB
+  - ❌ 详细计划的 chapter 编号和分组与 `generate_learning_plan` 输出**不一致**:
+    - 生成时: Ch 1 Getting Started, Ch 2 Variables, ... Ch 11 Testing（干净映射）
+    - 读取时: Ch 1-4 前言/序言/致谢, Ch 6 Getting Started, Ch 7 Variables...（编号偏移 +5，含前言杂项）
+  - 根因: 扁平存储 + 启发式重建。见 Issue #16
+
+- 判定（Round 2）: **部分通过**（生成 + 持久化功能正确，`get_learning_plan` 展示不一致阻塞完整通过）。
+
+---
+
+**Step 3 当前判定: 部分通过**（生成 + 持久化 ✅，`get_learning_plan` 层级重建不一致 → Issue #16 待修复）
+
+---
+
+### Step 8: Epic 2 相关测试集
+
+```bash
+pytest tests/unit/test_*_tool.py tests/unit/test_graph_*.py -q
+```
+
+- 结果: **152 passed** ✅
+- 判定: **通过**
+
+---
+
+### Step 9: 全量回归
+
+```bash
+pytest tests/ -q
+```
+
+- 结果: **243 passed** ✅
+- 判定: **通过**
+
+---
+
+### Step 10: 数据落库抽检
+
+- 方法: `docker exec mentor-agent-service python -c "..."` + sqlite3 模块
+- 表存在性:
+  - ✅ `topics`, `concepts`, `concept_edges` — 3 张表全部存在
+- 字段验证:
+  - `topics`: id(PK), name, description, source_material, created_at — ✅ 与 Story 2.2 设计一致
+  - `concepts`: id(PK), topic_id(FK), name, definition, difficulty, created_at — ✅
+  - `concept_edges`: id(PK), source_concept_id(FK), target_concept_id(FK), relationship_type, weight, created_at — ✅
+  - 注: `concept_edges` 无 `topic_id` 字段，topic 关联通过 concept.topic_id 隐式推导，属正常设计
+- 判定: **通过**
+
+---
+
+### Step 11: 计划与关系数据抽检
+
+- 计数汇总:
+  - topics: **1**（Python Crash Course）
+  - concepts: **31**（`docker compose down -v` 重建后 LLM 重新生成，vs 原始 33 为非确定性差异，正常）
+  - concept_edges: **61**（Step 5 + Step 5.5 两轮抽取累计）
+- topic description:
+  - `[{"chapter": "Introduction", "sections": ["Preface to the Third Edition", "Acknowledgments", "Introd...`
+  - ✅ Issue #16 修复生效 — description 存储原始 JSON 结构
+- concept 抽样（前10）:
+  - `Introduction`, `Preface to the Third Edition`, `Acknowledgments`, `Introduction`, `Part I: Basics`, `Chapter 1: Getting Started`, `Chapter 2: Variables...`, `Chapter 3: Introducing Lists`, `Chapter 4: Working with Lists`, `Chapter 5: if Statements`
+  - ✅ 名称与文档目录语义一致
+- edge 抽样（前10）:
+  - relationship_type: `prerequisite`, `related` 两种类型
+  - source/target ID 合法（均在 concepts 范围内）
+  - 示例: `Chapter 2 → Chapter 1 (prerequisite)`, `Chapter 3 → Chapter 6 (related)`
+- 判定: **通过**
+
+---
+
 ## 4. Issue 列表
 
 ### Issue #1: Streaming Agent Loop Double-Response Bug
@@ -622,7 +753,7 @@ break
 
 **严重程度**: HIGH（阻塞所有依赖 LLM 的测试步骤）
 **发现步骤**: Step 1 Round 5
-**修复状态**: 进行中
+**修复状态**: 已修复（v4.0.0 独立 OAuth，--login + auto-refresh）
 
 **现象**: claude-max-proxy 返回 401 `"OAuth token has expired"`，agent-service 的所有 LLM 调用失败。
 
@@ -830,6 +961,87 @@ messages.append(assistant_msg)
 
 ---
 
+### Issue #15: 容器启动不自动运行 Alembic migration — 设计遗漏
+
+**严重程度**: HIGH（阻塞所有 DB 依赖功能：generate_learning_plan, get_learning_plan, extract_concept_relationships）
+**发现步骤**: Step 3 Round 1
+**修复状态**: 已修复
+
+**现象**: `generate_learning_plan` 的幂等性检查 `get_topic_by_name()` 抛出 `OperationalError: no such table: topics`，工具立即返回错误。RAG 检索和 LLM 分析阶段从未执行。
+
+**根因分析**:
+
+- **Dockerfile** CMD 只启动 `uvicorn`，不执行 `alembic upgrade head`
+- **FastAPI lifespan** 为空（`yield` 前无任何初始化逻辑）
+- **设计文档**中所有涉及 DB 的 AC 都写 "Given Alembic migration 已运行"（假设手动执行）：
+  - Story 1.1 AC#4: "**可运行** `alembic upgrade head`"
+  - Story 2.2 AC#1: "**Given** Alembic migration 已运行"
+  - 验收步骤: "Run `alembic upgrade head` inside container"（手动）
+- 开发测试中始终手动运行 migration，问题未暴露
+- 这是**设计遗漏**（从未有任何 story/task 指定自动 migration），不是实施漏掉
+
+**修复**: `main.py` lifespan 增加启动时自动 migration:
+```python
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    try:
+        subprocess.run(["alembic", "upgrade", "head"], check=True)
+        logger.info("Database migrations applied successfully")
+    except Exception as exc:
+        logger.error("Failed to run database migrations: %s", exc)
+    yield
+```
+
+- 幂等：已执行的 revision 不重复跑
+- Fail Soft：migration 失败只 log 不崩溃
+- 选择 `alembic upgrade head` 而非 `create_all()`：保持 migration 版本链完整性
+
+**测试**: 238 全量通过。容器日志确认 `Database migrations applied successfully`。
+
+**关联文件**: `app/main.py:17-25`
+
+---
+
+### Issue #16: `get_learning_plan` 层级重建与原始计划不一致
+
+**严重程度**: MEDIUM（展示质量降级，数据无丢失）
+**发现步骤**: Step 3 Round 2（持久化验证）
+**修复状态**: 已修复（复测通过）
+
+**现象**: `generate_learning_plan` 输出的章节结构干净（Ch 1 Getting Started, Ch 2 Variables...），但 `get_learning_plan` 读取同一数据后展示的章节编号偏移（Ch 6 Getting Started），且出现前言/序言等非正文 chapter。
+
+**根因分析**:
+
+数据模型的设计限制 — `concepts` 表是扁平的，不区分 chapter vs section：
+
+```
+concepts 表:
+id=1  name="Preface"            topic_id=1  ← chapter? section?
+id=2  name="1. Getting Started"  topic_id=1  ← 靠名字猜
+id=3  name="1.1 Setting Up"     topic_id=1  ← 有 "1.1" → 当 section
+```
+
+两条展示路径使用不同格式化逻辑：
+
+| 路径 | 函数 | 数据源 | 效果 |
+|------|------|--------|------|
+| 生成 | `_format_plan()` | LLM 解析的 JSON `[{chapter, sections}]` | 层级精确 |
+| 读取 | `_format_plan_from_db()` | DB 扁平 concepts + `_is_section_name()` 启发式重建 | 层级可能偏差 |
+
+`_is_section_name()` 通过检查名字是否含 `"1.1"` 格式子编号来区分 chapter/section，但前言（Preface, Acknowledgments 等）被错误归为独立 chapter，导致后续编号偏移。
+
+**修复方案**: 复用已有的 `topic.description`（nullable TEXT）存储生成时的原始 JSON 结构，读取时优先从 JSON 还原层级，description=None 的 legacy topic 回退到启发式。零 migration。详见 `docs/refactoring/issue-16-learning-plan-hierarchy.md`。
+
+**修复状态**: 已修复（代码 + 单测，243 passed，待人工复测 Step 3）
+
+**改动摘要**:
+- `learning_plan_tool.py`: 生成路径传 `description=json.dumps(parsed)`；新增 `_resolve_plan_display()` 辅助函数（优先 JSON → fallback DB 启发式）；幂等路径和读取路径统一走 `_resolve_plan_display`
+- `test_learning_plan_tool.py`: +5 tests（description JSON 路径、幂等跳过 `_format_plan_from_db`、None/invalid/wrong-structure fallback）
+
+**关联文件**: `learning_plan_tool.py:189-215`（`_resolve_plan_display`）, `learning_plan_tool.py:323-329`（`add_topic` + description）
+
+---
+
 ## 5. 时间线（问题与修复）
 
 | 时间顺序 | 事件 | 结论/动作 |
@@ -892,6 +1104,22 @@ messages.append(assistant_msg)
 | T56 | 根因: `messages.append()` 保留了被丢弃的 content，LLM 写续篇 | 用户与 LLM 信息不对称 |
 | T57 | 修复 Issue #14: 丢弃 content 时同步从 assistant message 中移除 | 238 全量通过 |
 | T58 | Issue #14 复测: 3 轮 Step 1 + Step 2 测试，回答完整、无截断、无工具调用错误 | **Issue #14 确认修复，Step 1 + Step 2 通过** |
+| T59 | Step 3 Round 1: `generate_learning_plan` 失败 — `no such table: topics` | Issue #15 — 容器未自动 migration |
+| T60 | 根因分析: Dockerfile / lifespan / 设计文档均无自动 migration 规定 | 确认为设计遗漏 |
+| T61 | 修复 Issue #15: lifespan 增加 `alembic upgrade head` | 238 全量通过 |
+| T62 | Step 3 Round 2: 生成+持久化成功（`stored topic_id=1 concepts=33 elapsed=5.4s`） | **Step 3 生成+持久化通过** |
+| T63 | 持久化验证: `get_learning_plan` 返回 33 concepts，但章节编号与生成时不一致 | Issue #16 — 扁平存储 + 启发式重建 |
+| T64 | Issue #16 修复: `topic.description` 存原始 JSON + `_resolve_plan_display` | 243 passed |
+| T65 | Step 3 复测: 重建容器后 `generate_learning_plan` + `get_learning_plan` 层级一致 | **Step 3 通过** |
+| T66 | Step 4: 基于已生成计划追问 next step，回答合理 | **Step 4 通过** |
+| T67 | Step 5: 关系抽取触发成功，返回 prerequisite/related 关系 | **Step 5 通过** |
+| T68 | Step 5.5: 二次抽取 — 跳过 32 条已有边，新增 10 条（LLM 非确定性） | **Step 5.5 通过**（AC#7 去重幂等满足） |
+| T69 | Step 7: RAG 不可用，`search_knowledge_base` 3 次返回错误，LLM 未告知用户检索失败，静默用对话历史/计划数据/训练知识回答 | **Step 7 未通过**（降级提示缺失，非阻塞） |
+| T70 | Step 8: Epic 2 相关测试集 `pytest tests/unit/test_*_tool.py tests/unit/test_graph_*.py -q` | **152 passed** ✅ |
+| T71 | Step 9: 全量回归 `pytest tests/ -q` | **243 passed** ✅ |
+| T72 | Step 10: 数据落库抽检 — `docker exec` + Python sqlite3 验证 | **通过**（详见下方） |
+| T73 | Step 11: 计划与关系数据抽检 — 计数+抽样对照 | **通过**（详见下方） |
+| T74 | Step 6: 关系可用性验证 — 用户人工测试通过 | **Step 6 通过** |
 
 ## 6. 当前状态与下一步
 
@@ -911,8 +1139,203 @@ messages.append(assistant_msg)
   - Issue #12（LLM 参数名拼写错误）: **已修复**（合并入 Issue #13 方案：schema 移除参数 + 参数过滤）。
   - Issue #13（TypeError 安全网泄露签名）: **已修复**（3 轮复测一致通过）。
   - Issue #14（Buffer+Discard 消息不一致）: **已修复**（3 轮复测 Step 1 + Step 2 一致通过）。
+  - Issue #15（容器未自动 migration）: **已修复**（lifespan 增加 `alembic upgrade head`）。
+  - Issue #16（get_learning_plan 层级重建不一致）: **已修复**（`topic.description` 存原始 JSON + `_resolve_plan_display`，复测通过）。
   - **Step 1 通过**（Round 8 + Issue #12-14 修复后 3 轮复测确认）。
   - **Step 2 通过**（3 轮复测确认，无工具调用错误）。
-- 下一步:
-  1. Prompt 精简（去重 system prompt vs tool schema）
-  2. 继续执行 Step 3~11 完整验收流程
+  - **Step 3 通过**（Issue #16 修复后复测，generate + get 层级一致）。
+  - **Step 4 通过**（基于已生成计划追问 next step，回答合理）。
+  - **Step 5 通过**（关系抽取触发成功，返回 prerequisite/related 关系）。
+  - **Step 5.5 通过**（AC#7 去重幂等：32 条已有边跳过、无重复边、无报错。抽取策略为增量收敛，非严格二次零新增 — 10 条新边源于 LLM 非确定性）。
+  - **Step 6 通过**（关系可用性验证）。
+  - **Step 7 未通过**（建议项，非阻塞）。工具层正确返回 "Open WebUI is unreachable" 错误（3 次），但 LLM 未向用户告知本轮 RAG 检索失败，静默利用对话历史、`get_learning_plan` 数据及自身训练知识回答（内容本身可能正确，因上传文档为公开教材 Python Crash Course）。核心问题是**透明度**而非内容准确性。修复方向：system prompt 强化 RAG 失败透明度，或应用层拦截工具错误注入降级消息。
+  - **Step 8 通过**（152 passed）。
+  - **Step 9 通过**（243 passed）。
+  - **Step 10 通过**（3 张表存在，字段与 Story 2.2 设计一致）。
+  - **Step 11 通过**（topics=1, concepts=31, edges=61，description 存储 JSON，Issue #16 修复生效）。
+- **Epic 2 判定: 全部必须步骤通过，可进入 Epic 3 主开发。**
+  - 必须步骤（Step 1~6, 5.5, 8~11）: 全部通过 ✅
+  - 建议步骤（Step 7 Fail Soft）: 未通过，已记录 TD-009，非阻塞
+- 遗留技术债:
+  - TD-009: RAG 失败透明度（LLM 层）
+
+---
+
+## 7. Epic 2 验收后硬化（Post-acceptance Hardening）
+
+日期: 2026-02-22
+触发: Epic 2 验收通过后，多 KB 场景人工测试暴露新问题
+
+### Round 9: 多 KB 场景测试
+
+**环境**: 2 个知识库（AI-Assisted Programming, Python）
+
+#### Issue #17: LLM UUID 编造（TD-010 触发点）
+
+**严重程度**: HIGH
+**修复状态**: 已修复
+
+**现象**: `list_collections`（原 `list_knowledge_bases`）返回 KB 列表含 UUID，用户选择后 LLM 传给 `generate_learning_plan` 的 UUID 首段正确、后半段编造。
+
+**日志证据**:
+```
+list_collections 返回: 952034a3-01ac-4814-bf5e-97bcfc4ec361
+LLM 传入: 952034a3-b071-4938-8769-24f1ec50d3de  ← 后半段编造
+```
+
+**修复（4 项改动）**:
+1. `list_collections` 输出仅名称，不暴露 UUID
+2. `_resolve_collection_name_to_id()` — 新增 case-insensitive name→UUID 解析函数
+3. `generate_learning_plan` — 接受人类可读名称，内部 resolve 为 UUID
+4. KB discovery 输出统一隐藏 UUID
+
+**测试**: 250 passed。
+
+#### Issue #18: `list_knowledge_bases` → `list_collections` 重命名
+
+**严重程度**: LOW（命名一致性）
+**修复状态**: 已修复
+
+**改动**: 工具函数、registry 注册名、schema description、system prompt、测试文件名全部更新。内部变量 `kb_id` → `collection_id`。
+
+**产出**: `docs/improvement/naming-conventions.md`（命名规范备忘录）
+
+**测试**: 250 passed。
+
+#### Issue #19: `search_knowledge_base` 跨库污染
+
+**严重程度**: HIGH
+**修复状态**: 已修复
+
+**现象**: LLM 在调用 `generate_learning_plan` 的同时并行调用 `search_knowledge_base`，后者 schema 不暴露 `collection_name` → auto-discover 搜索所有 KB → 返回其他书籍内容（Python Crash Course, Pro Git 等）。
+
+**根因**: `search_knowledge_base` schema 无 `collection_name` 参数，LLM 直接调用时无法指定搜索范围。即使尝试传入，`_execute_tool()` 的 schema 参数过滤也会静默丢弃。
+
+**修复**:
+1. `search_knowledge_base` schema 恢复 `collection_name` 可选参数（描述引导传人类可读名称）
+2. 函数入口新增 name→UUID 解析块（Fail Soft: 解析失败时 pass-through）
+3. +2 新测试: resolution 成功 → UUID 替换；resolution 失败 → pass-through
+
+**测试**: 252 passed。
+
+#### Issue #20: AI-Assisted Programming KB 索引质量
+
+**严重程度**: N/A（非代码问题）
+**修复状态**: 不适用
+
+**现象**: 修复 Issue #19 后，搜索正确定向到 "AI-Assisted Programming" KB，但返回零散代码片段和乱码。
+
+**诊断**: Open WebUI `#` tag 直接搜索确认 KB 内容存在但质量差 — PDF 解析问题（可能为扫描版或特殊格式），非代码侧问题。
+
+### Round 9 时间线
+
+| 时间 | 事件 | 结论 |
+|---|---|---|
+| T75 | 多 KB 测试: LLM 编造 UUID | Issue #17 — UUID 隐藏 |
+| T76 | 工具重命名 `list_knowledge_bases` → `list_collections` | Issue #18 — 命名一致性 |
+| T77 | 内部变量清理 `kb_id` → `collection_id` | 命名规范补充 |
+| T78 | 重建后测试: LLM 不再编造参数，但搜索结果来自其他 KB | Issue #19 — schema 缺 collection_name |
+| T79 | 恢复 `collection_name` 到 schema + name→UUID 解析 | 252 passed |
+| T80 | 重建后测试: 搜索正确定向到目标 KB，但内容质量差 | Issue #20 — PDF 索引质量（非代码问题） |
+
+### Round 9 状态汇总
+
+- Issue #17（UUID 编造）: **已修复**
+- Issue #18（工具重命名）: **已修复**
+- Issue #19（跨库污染）: **已修复**
+- Issue #20（PDF 索引质量）: **不适用**（Open WebUI 侧问题）
+- TD-010: **已解决**（移至 Resolved）
+- 测试总数: 238 → 252（+14 新测试）
+
+### Round 10: 多文档 collection + `list_collections` 增强
+
+**环境**: 同 Round 9（2 个 KB），AI-Assisted Programming 含 5 本书
+
+#### 发现 1: `#` 引用 collection 成功率更高
+
+**严重程度**: N/A（UX 建议）
+
+Open WebUI 对话框中用 `#collection_name` 直接引用知识库的 RAG 命中率明显高于 agent 工具调用 `search_knowledge_base`。原因：`#` 引用由前端直接注入 RAG 上下文，绕过 agent tool-loop 的不确定性。
+
+**处理**: 记录到 `docs/improvement/user-manual-writing-notes.md`，推荐用户使用 `#` 前缀。
+
+#### Issue #21: `list_collections` 不展示 collection 内文档列表
+
+**严重程度**: HIGH
+**修复状态**: 已修复
+
+**现象**: LLM 调用 `list_collections` 后只看到 collection 名 "AI-Assisted Programming"，无法得知内部有 5 本书，把 collection 名当成一本书的名字。
+
+**API 调研**:
+- `GET /api/v1/knowledge/{id}` 返回 `files: null`（Open WebUI 0.8.3 不填充该字段）
+- `GET /api/v1/knowledge/{id}/files` **可用**，返回 `{"items": [...], "total": 5}`，含 `filename` 字段
+
+**修复**:
+1. 新增 `_fetch_collection_files(collection_id)` — 调用 `/files` 端点获取文件列表
+2. 新增 `_extract_filenames(files)` — 防御性文件名提取（`filename` → `name` → `meta.name`）
+3. `list_collections()` 用 `asyncio.gather` 并行获取，输出含文档名，截断上限 10
+4. 旧的 `_fetch_collection_detail()` 删除（无用的 detail 端点调用）
+
+**验证**: host rebuild 后 LLM 正确列出 2 个 collection + 各自文档名称。
+
+**测试**: 259 passed（+17 list_collections 测试重写）。
+
+#### Issue #21 附带: Integration 测试修复（11 个预存失败）
+
+**严重程度**: LOW
+**修复状态**: 已修复
+
+| 类别 | 失败数 | 根因 | 修复 |
+|------|--------|------|------|
+| Alembic 路径 | 7 | `script_location = alembic` 相对路径从 workspace 根目录解析失败 | `cfg.set_main_option` 覆盖为绝对路径 |
+| API key 未 mock | 2 | `_fetch_knowledge_base_items()` 在 `search_knowledge_base` mock 之前被调用 | 补充 `_fetch_knowledge_base_items` / `settings` mock |
+| System prompt 路径 | 2 | `system_prompt_path` 相对路径从 workspace 根目录解析找不到文件 | mock `prompt_service.settings` 指向绝对路径 |
+
+**测试**: 259 passed（0 failures）。
+
+### Round 11: 学习计划重新生成
+
+**环境**: 同 Round 10
+
+#### TD-012 + TD-014 复合问题
+
+**严重程度**: MEDIUM
+**修复状态**: 记录为技术债
+
+**现象**: 用户要求为 AI-Assisted Programming collection 生成学习计划，LLM 连续调用 5 次 `generate_learning_plan`（每本书一次），全部被幂等性检查拦截，返回旧的混乱计划（之前 TD-012 多文档混乱生成的）。
+
+**根因分析**:
+- **TD-012**: `generate_learning_plan` 不支持多文档 collection，RAG 返回多本书混合内容
+- **TD-014**: 幂等性检查（`learning_plan_tool.py:251`）阻止重新生成，无 `force` 参数
+
+**处理**: 两项技术债已记录到 `docs/improvement/tech-debt.md`。
+
+#### TD-013: Agent 图片消息卡住
+
+**严重程度**: MEDIUM
+**修复状态**: 记录为技术债
+
+**现象**: 用户向 agent 发送截图后卡住超过 2 分钟无响应。推测 proxy 层或 LLM API 处理 vision 请求延迟。
+
+**处理**: 技术债已记录。
+
+### Round 10-11 时间线
+
+| 时间 | 事件 | 结论 |
+|---|---|---|
+| T81 | 多文档 collection 测试: LLM 把 collection 名当书名 | Issue #21 — list_collections 增强 |
+| T82 | API 调研: detail 端点 files=null，/files 端点可用 | 选择 /files 端点 |
+| T83 | 实施: _fetch_collection_files + list_collections 重写 | 259 passed |
+| T84 | host rebuild 验证: LLM 正确列出 5 本书名 | Issue #21 ✅ |
+| T85 | Integration 测试修复（alembic 路径、API key mock、prompt 路径） | 259 passed, 0 failures |
+| T86 | 学习计划重新生成: 幂等性阻止 + 多文档混乱 | TD-012 + TD-014 |
+| T87 | 图片消息卡住 | TD-013 |
+
+### Round 10-11 状态汇总
+
+- Issue #21（list_collections 文档列表）: **已修复**
+- Integration 测试预存失败（11 个）: **已修复**
+- TD-012（多文档 collection 支持）: **已记录**
+- TD-013（图片消息卡住）: **已记录**
+- TD-014（学习计划无法重新生成）: **已记录**
+- 测试总数: 252 → 259（+7 净增）

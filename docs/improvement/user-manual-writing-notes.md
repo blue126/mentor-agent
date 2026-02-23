@@ -20,7 +20,15 @@
   - Docling 关键配置: `DOCLING_PARAMS` 内的 `do_ocr`, `force_ocr`, `ocr_engine`, `ocr_lang`。
   - 手册建议: 增加“扫描 PDF 无检索结果时先检查 OCR 引擎”的排障条目。
 
-## 2) 参考来源（编写手册时复核）
+## 2) 对话技巧（Prompt / UX）
+
+- **`#` 引用 collection 成功率更高**
+  - 发现: 在 Open WebUI 对话框中使用 `#collection_name` 直接引用知识库，比通过 agent 工具调用 `search_knowledge_base` 的成功率明显更高。
+  - 原因推测: `#` 引用由 Open WebUI 前端直接注入 RAG 上下文，绕过了 agent tool-loop 的不确定性（LLM 可能不调用、调错参数、或并行调用导致混乱）。
+  - 手册建议: 推荐用户在提问时使用 `#知识库名称` 前缀来确保检索命中，尤其在首次提问或需要精确引用特定知识库时。
+  - 来源: Epic 2 验收后人工测试 (2026-02-22)
+
+## 3) 参考来源（编写手册时复核）
 
 - Open WebUI 环境变量文档: `https://docs.openwebui.com/reference/env-configuration/`
 - Open WebUI RAG 文档: `https://docs.openwebui.com/features/chat-conversations/rag/`

@@ -50,6 +50,15 @@ Each entry tracks: origin story, severity, description, and suggested fix.
 - **Suggested fix**: 增加环境开关（例如 `TOOL_ENABLE_ECHO`），在 prod 默认关闭、dev/test 默认开启；并在用户手册/运维手册说明环境差异。
 - **Files**: `mentor-agent-service/app/tools/__init__.py:11`, `_bmad-output/planning-artifacts/epics.md:177`
 
+### TD-008: Legacy topic 无 plan JSON — `get_learning_plan` 启发式回退
+
+- **Origin**: Epic 2 Issue #16 修复
+- **Severity**: Low
+- **Description**: Issue #16 修复后，新生成的 topic 会在 `description` 字段存储原始 JSON 结构，`get_learning_plan` 可精确还原层级。但修复前已生成的 topic（`description=None`）仍走 `_format_plan_from_db()` 启发式重建（通过名称编号前缀区分 chapter/section），可能出现层级偏差（如前言被当作 chapter 导致编号偏移）。
+- **Impact**: 仅影响修复前已有的 topic。单用户场景下删除重建即可。若未来需要批量修复，可写一次性 backfill 脚本。
+- **Suggested fix**: 编写 backfill 脚本：对 `description IS NULL` 的 topic，用 `_format_plan_from_db` 反推 JSON 并写入 `description`。或要求用户对旧 topic 重新生成。
+- **Files**: `mentor-agent-service/app/tools/learning_plan_tool.py`
+
 ### TD-007: Provisional/Commit SSE 协议（实时流式 + 防 double-response）
 
 - **Origin**: Epic 2 Step 1 double-response bug 修复过程中，Codex 架构评审建议
@@ -66,7 +75,75 @@ Each entry tracks: origin story, severity, description, and suggested fix.
 - **Blocked by**: Open WebUI 前端改造（非本项目控制范围）
 - **Files**: `mentor-agent-service/app/services/agent_service.py:146-240`, `mentor-agent-service/app/utils/sse_generator.py`
 
+### TD-009: LLM 绕过工具编造结果 + RAG 降级不透明
+
+- **Origin**: Epic 2 Step 7 人工验证 → Epic 2 验收后多 KB 测试复现升级
+- **Severity**: **High**（LLM 可完全绕过工具链，输出无法验证的虚假内容）
+- **Description**: 发现两类 LLM 不诚实行为：
+  1. **工具调用编造（Fabrication）**：多 KB 场景下，LLM 调用 `list_collections` 获取 KB 列表后，未调用 `generate_learning_plan`，而是在文本输出中伪造工具调用 UI（"🔧 Running generate_learning_plan..."）并编造完整学习计划。容器日志确认 `generate_learning_plan` 从未被调用（`finish_reason=stop`，零 tool_call），DB 无对应 topic 记录。
+  2. **RAG 降级静默**：`search_knowledge_base` 返回错误字符串时，LLM 不告知用户 RAG 失败，静默用训练知识替代。
+- **Impact**:
+  - 用户无法区分"基于上传文档的真实结果"与"LLM 编造的内容"
+  - 在专有/非公开资料场景下，编造内容可能完全错误且不可验证
+  - 破坏用户对工具链的信任
+- **Evidence**: 2026-02-22 容器日志 — `list_collections` 调用 2 次后 `finish_reason=stop`；后续请求全部 `finish_reason=stop` 无任何工具调用；DB 仅 1 个 topic（Python Crash Course），无 AI-Assisted Programming
+- **Suggested fix**:
+  1. **System prompt 强化（必须）**：明确禁止 LLM 在未调用工具的情况下声称已调用；要求在工具返回错误时如实告知用户
+  2. **应用层校验（推荐）**：在 `agent_service.py` tool-loop 结束后，检测最终回答文本是否包含工具调用标记（如 "🔧 Running"）但实际 tool_call 记录中无对应调用，若检测到则注入警告
+  3. **结构化输出约束（长期）**：将学习计划生成结果限制为 structured output（JSON schema），使 LLM 无法在 free-text 中绕过工具链伪造格式化输出
+- **Files**: `mentor-agent-service/app/prompts/mentor_system_prompt.md`, `mentor-agent-service/app/services/agent_service.py`
+
+### TD-011: `TOC_ANALYSIS_PROMPT` 允许无证据的推测性章节分组
+
+- **Origin**: Epic 2 验收后 GPT 代码审查 + TD-009 讨论
+- **Severity**: Low（仅在 RAG 返回无清晰目录结构的内容时触发）
+- **Description**: `TOC_ANALYSIS_PROMPT` 第 22 行规则 `If no clear chapter/section structure, create logical groupings` 允许内部 LLM 在 RAG 检索文本缺少明确目录时自行编造章节结构。产出的 JSON 格式合法，会被直接存储和展示，无"证据绑定"约束（不要求每章对应原文片段）。与 TD-009 不同：TD-009 是 agent 层 LLM 绕过工具；TD-011 是工具内部 inner LLM prompt 太宽松。
+- **Impact**: 工具正常调用时，若上传文档本身缺少清晰目录（如论文集、笔记），生成的学习计划可能包含凭空编造的章节划分。单一结构化教材场景下几乎不触发。
+- **Suggested fix**:
+  1. 收紧 prompt：将 `create logical groupings` 改为 `return an error or flag that no clear structure was found`，让调用方决定是否回退
+  2. 可选：要求 inner LLM 在 JSON 中附带每章对应的原文引用片段（evidence binding），便于后续校验
+- **Files**: `mentor-agent-service/app/tools/learning_plan_tool.py:22`
+
+### TD-013: Agent 收到图片消息时长时间卡住
+
+- **Origin**: Epic 2 验收后人工测试 (2026-02-22)
+- **Severity**: Medium
+- **Description**: 用户在 Open WebUI 中向 agent 发送截图时，agent 卡住超过 2 分钟无响应。推测原因：图片消息通过 claude-max-proxy 转发给 Claude API，proxy 或 LLM 处理图片的延迟显著高于纯文本；当前 agent loop 无图片消息的超时或降级处理。
+- **Impact**: 用户体验差，无法分享截图进行交互式学习（如分享代码截图、错误截图等场景）。
+- **Suggested fix**:
+  1. **排查瓶颈**: 确认延迟发生在 proxy 层（转发图片 base64 耗时）还是 LLM API 层（处理 vision 请求耗时），通过 proxy 和 agent-service 的日志对比时间戳
+  2. **超时配置**: 检查 `agent_service.py` 中 litellm `acompletion` 调用的 timeout 设置，对含图片的请求适当放宽或设置合理上限
+  3. **用户反馈**: 在 SSE stream 中尽早发送 heartbeat 或处理状态提示，避免前端判定连接超时
+- **Files**: `mentor-agent-service/app/services/agent_service.py`, `claude-max-proxy/server.js`
+
 ## Resolved Items
+
+### TD-012: `generate_learning_plan` 不支持多文档 collection
+
+- **Origin**: Epic 2 验收后人工测试 (2026-02-22)
+- **Severity**: Medium
+- **Resolution**: 已实施 (2026-02-23)。核心改动：
+  1. **多文档检测**: `_fetch_collection_files()` 获取文件列表 → `_match_filename()` 路由到单文件/批量/歧义路径
+  2. **逐文件生成**: `_generate_plan_for_file()` 用 `_query_collection_raw(k=20/40)` + `_filter_chunks_by_source()` 按 metadata 过滤 → LLM 分析 → 原子写入 DB
+  3. **Stem-based 过滤**: `_stem()` + 双向包含匹配，修复了元数据无扩展名时的匹配失败
+  4. **k 重试**: k=20 过滤后不足 `_MIN_CHUNKS_FOR_PLAN` 时自动重试 k=40
+  5. **collection_name 改为 required**: 移除 KB auto-discovery 分支，简化流程
+  6. **执行顺序重构**: idempotency check 移到 multi-doc detection 之后，避免 collection 名称命中旧 topic 导致 short-circuit
+- **Files**: `app/tools/learning_plan_tool.py`, `app/tools/search_knowledge_base_tool.py`, `app/tools/__init__.py`
+
+### TD-014: `generate_learning_plan` 幂等性阻止重新生成
+
+- **Origin**: Epic 2 验收后人工测试 (2026-02-22)
+- **Severity**: Medium
+- **Resolution**: 已实施 (2026-02-23)。新增 `force: bool = False` 参数，`force=True` 时采用"先建后拆"策略（先完成 RAG+LLM+parse，成功后在同一事务中 `delete_topic_cascade` + 建新），确保 RAG/LLM 失败时旧计划完好。Tool schema 已暴露 `force` 参数。
+- **Files**: `app/tools/learning_plan_tool.py`, `app/tools/__init__.py`
+
+### TD-010: 多知识库场景下搜索范围未隔离
+
+- **Origin**: Epic 2 验收后讨论
+- **Severity**: Medium
+- **Resolution**: 已实施。三项改动解决：(1) `list_collections` 输出仅名称，不暴露 UUID；(2) `search_knowledge_base` 和 `generate_learning_plan` schema 均暴露 `collection_name` 可选参数，接受人类可读名称；(3) `_resolve_collection_name_to_id()` 在工具内部做 case-insensitive name→UUID 解析。详见 `docs/refactoring/multi-kb-isolation.md`。
+- **Files**: `app/tools/search_knowledge_base_tool.py`, `app/tools/learning_plan_tool.py`, `app/tools/__init__.py`
 
 ### TD-002: add_edge has local variable shadowing global _digraph
 
