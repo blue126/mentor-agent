@@ -361,7 +361,7 @@ class TestRunAgentLoopStreaming:
 
         events = []
         async for event in run_agent_loop_streaming(
-            messages=[{"role": "user", "content": "test"}],
+            messages=[{"role": "user", "content": "search test"}],
         ):
             events.append(event)
 
@@ -430,7 +430,7 @@ class TestRunAgentLoopStreaming:
 
         events = []
         async for event in run_agent_loop_streaming(
-            messages=[{"role": "user", "content": "test"}],
+            messages=[{"role": "user", "content": "search test"}],
         ):
             events.append(event)
 
@@ -488,7 +488,7 @@ class TestRunAgentLoopStreaming:
 
         events = []
         async for event in run_agent_loop_streaming(
-            messages=[{"role": "user", "content": "test"}],
+            messages=[{"role": "user", "content": "search test"}],
         ):
             events.append(event)
 
@@ -581,3 +581,119 @@ class TestExecuteToolParamAlias:
 
         assert result == "ok"
         mock_func.assert_called_once_with(source_name="Book")
+
+
+class TestShouldUseToolLoopForStreaming:
+    """Tests for _should_use_tool_loop_for_streaming heuristic."""
+
+    def test_keyword_match_returns_true(self):
+        """Message containing a tool keyword → tool loop."""
+        from app.services.agent_service import _should_use_tool_loop_for_streaming
+
+        messages = [{"role": "user", "content": "Show me my learning plan"}]
+        assert _should_use_tool_loop_for_streaming(messages) is True
+
+    def test_chinese_keyword_match_returns_true(self):
+        """Chinese tool keywords also trigger tool loop."""
+        from app.services.agent_service import _should_use_tool_loop_for_streaming
+
+        messages = [{"role": "user", "content": "查看我的学习计划"}]
+        assert _should_use_tool_loop_for_streaming(messages) is True
+
+    def test_no_keyword_returns_false(self):
+        """Casual greeting without tool keywords → fast path."""
+        from app.services.agent_service import _should_use_tool_loop_for_streaming
+
+        messages = [{"role": "user", "content": "你好"}]
+        assert _should_use_tool_loop_for_streaming(messages) is False
+
+    def test_checks_latest_user_message(self):
+        """Heuristic checks the LAST user message, not earlier ones."""
+        from app.services.agent_service import _should_use_tool_loop_for_streaming
+
+        messages = [
+            {"role": "user", "content": "Search the knowledge base"},
+            {"role": "assistant", "content": "Here are the results."},
+            {"role": "user", "content": "谢谢"},
+        ]
+        assert _should_use_tool_loop_for_streaming(messages) is False
+
+
+class TestFastPathStreaming:
+    """Tests for fast path (no tool loop) streaming."""
+
+    @patch("app.services.agent_service.settings")
+    @patch("app.services.agent_service.llm_service")
+    async def test_fast_path_streams_directly(self, mock_llm, mock_settings):
+        """No tool keywords → fast path: stream directly without tools."""
+        from app.services.agent_service import run_agent_loop_streaming
+        from tests.test_doubles import MockChunk
+
+        mock_settings.litellm_model = "test-model"
+        mock_settings.sse_heartbeat_interval = 60
+
+        async def _mock_stream():
+            yield MockChunk("Hello there!")
+            yield MockChunk(None, finish_reason="stop")
+
+        mock_llm.stream_chat_completion = AsyncMock(return_value=_mock_stream())
+
+        messages = [{"role": "user", "content": "你好"}]
+        events = []
+        async for event in run_agent_loop_streaming(messages):
+            events.append(event)
+
+        event_text = "".join(events)
+        assert "Hello there" in event_text
+        assert "data: [DONE]" in event_text
+
+        # stream_chat_completion called WITHOUT tools parameter
+        call_kwargs = mock_llm.stream_chat_completion.call_args
+        assert "tools" not in call_kwargs.kwargs
+
+    @patch("app.services.agent_service.litellm")
+    @patch("app.services.agent_service.registry")
+    @patch("app.services.agent_service.settings")
+    @patch("app.services.agent_service.llm_service")
+    async def test_tool_keyword_uses_tool_loop(self, mock_llm, mock_settings, mock_registry, mock_litellm):
+        """Tool keyword in message → tool loop path (not fast path)."""
+        from app.services.agent_service import run_agent_loop_streaming
+        from tests.test_doubles import MockChunk
+
+        mock_settings.max_tool_iterations = 10
+        mock_settings.sse_heartbeat_interval = 60
+        mock_settings.litellm_model = "test-model"
+
+        mock_registry.get_all_schemas.return_value = [
+            {"type": "function", "function": {"name": "echo"}}
+        ]
+        mock_registry.get_tool.return_value = AsyncMock(return_value="hi")
+
+        tool_resp = _make_tool_call_response("echo", '{"message":"hi"}', "toolu_1")
+        text_resp = _make_text_response("Echo result")
+
+        async def _tool_stream():
+            yield MockChunk(None)
+
+        async def _text_stream():
+            yield MockChunk("Echo result", finish_reason="stop")
+
+        mock_llm.stream_chat_completion = AsyncMock(
+            side_effect=[_tool_stream(), _text_stream()]
+        )
+        mock_litellm.stream_chunk_builder = MagicMock(
+            side_effect=[tool_resp, text_resp]
+        )
+
+        # Message contains "echo" keyword → tool loop
+        messages = [{"role": "user", "content": "echo hello"}]
+        events = []
+        async for event in run_agent_loop_streaming(messages):
+            events.append(event)
+
+        event_text = "".join(events)
+        assert "Running echo" in event_text
+        assert "data: [DONE]" in event_text
+        # Tool loop used: stream_chat_completion called WITH tools
+        first_call_kwargs = mock_llm.stream_chat_completion.call_args_list[0]
+        assert "tools" in first_call_kwargs.kwargs

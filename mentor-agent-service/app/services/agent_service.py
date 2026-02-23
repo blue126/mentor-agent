@@ -18,12 +18,50 @@ from app.services import llm_service, prompt_service
 from app.tools import registry
 from app.utils.sse_generator import (
     make_done_event,
+    make_heartbeat_event,
     make_status_event,
     queue_sse_stream,
     run_heartbeat,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Maintenance contract: when adding/removing tools in registry, update this set
+# and ensure streaming tests use messages containing at least one keyword.
+_TOOL_INTENT_KEYWORDS = {
+    # search_knowledge_base / list_collections
+    "knowledge", "search", "rag", "collection",
+    "知识库", "检索", "搜索",
+    "document", "文档", "pdf", "book", "书",
+    # generate_learning_plan / get_learning_plan
+    "plan", "learn", "study", "roadmap", "next",
+    "计划", "学习", "下一步",
+    # extract_concept_relationships
+    "relationship", "graph", "concept", "prerequisite",
+    "关系", "图谱", "概念", "前置",
+    # progress / quiz (Epic 3-5 future tools)
+    "progress", "quiz", "practice",
+    "进度", "测验", "题", "练习",
+    # external integrations
+    "notion", "anki",
+    # generic
+    "tool", "echo", "工具",
+}
+
+
+def _should_use_tool_loop_for_streaming(messages: list[dict[str, Any]]) -> bool:
+    """Heuristic gate: only enter tool loop when latest user turn hints tool usage.
+
+    False positive (tool loop for casual chat) = minor UX cost (no streaming).
+    False negative (fast path for tool-needing message) = tools unavailable.
+    Err on the side of tool loop — only pure greetings/acknowledgments bypass.
+    """
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            content = str(message.get("content", "")).lower()
+            return any(keyword in content for keyword in _TOOL_INTENT_KEYWORDS)
+    return False
 
 
 async def _inject_system_prompt(messages: list[dict[str, Any]]) -> None:
@@ -188,13 +226,35 @@ async def run_agent_loop_streaming(
 
     async def _agent_loop() -> None:
         try:
+            # Fast path: avoid tool-loop overhead for normal chat turns.
+            # Stream directly from LLM without tools for real-time token output.
+            if not _should_use_tool_loop_for_streaming(messages):
+                logger.info("fast-path(stream) no tool keywords detected")
+                stream_result = await llm_service.stream_chat_completion(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                if isinstance(stream_result, str):
+                    await queue.put(make_status_event(f"⚠️ {stream_result}", resolved_model))
+                else:
+                    async for chunk in stream_result:
+                        chunk_dict = chunk.model_dump(exclude_none=True)
+                        await queue.put(f"data: {json.dumps(chunk_dict)}\n\n")
+                await queue.put(make_done_event())
+                return
+
             tools = registry.get_all_schemas()
             iteration = 0
 
             while iteration < settings.max_tool_iterations:
+                # Immediately signal processing started — triggers client's
+                # native thinking indicator before LLM TTFB delay.
+                await queue.put(make_heartbeat_event())
                 logger.info("tool-loop(stream) iteration=%s", iteration + 1)
 
-                # Always stream with tools — let LLM decide whether to use them
+                # Stream with tools + buffer — let LLM decide whether to use them
                 stream_result = await llm_service.stream_chat_completion(
                     messages=messages,
                     model=model,
@@ -217,8 +277,17 @@ async def run_agent_loop_streaming(
                     chunks.append(chunk)
                     chunk_dict = chunk.model_dump(exclude_none=True)
                     choices = chunk_dict.get("choices", [])
-                    if choices and choices[0].get("delta", {}).get("content"):
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {})
+                    finish_reason = choices[0].get("finish_reason")
+                    if delta.get("content"):
                         buffered_content.append(f"data: {json.dumps(chunk_dict)}\n\n")
+                    elif not delta.get("tool_calls") and finish_reason is None:
+                        # Forward non-content deltas (empty / role-only) to client.
+                        # These carry no visible text but trigger Open WebUI's native
+                        # thinking indicator — same as direct LLM connection.
+                        await queue.put(f"data: {json.dumps(chunk_dict)}\n\n")
 
                 # Rebuild complete response to inspect finish_reason / tool_calls
                 try:

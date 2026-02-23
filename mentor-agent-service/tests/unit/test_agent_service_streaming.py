@@ -211,7 +211,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_registry.get_tool.return_value = mock_echo
         mock_registry.get_all_schemas.return_value = []
 
-        messages = [{"role": "user", "content": "Loop"}]
+        messages = [{"role": "user", "content": "echo Loop"}]
         events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
 
         # Should contain max iterations warning
@@ -249,7 +249,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_registry.get_tool.return_value = mock_echo
         mock_registry.get_all_schemas.return_value = []
 
-        messages = [{"role": "user", "content": "Crash"}]
+        messages = [{"role": "user", "content": "echo Crash"}]
         events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
 
         # Tool error is fed back to LLM, stream should still complete
@@ -332,7 +332,7 @@ class TestRunAgentLoopStreamingSSE:
 
         mock_registry.get_all_schemas.return_value = []
 
-        messages = [{"role": "user", "content": "Bad JSON"}]
+        messages = [{"role": "user", "content": "echo Bad JSON"}]
         events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
 
         # Stream should complete normally
@@ -385,7 +385,7 @@ class TestRunAgentLoopStreamingSSE:
             side_effect=RuntimeError("builder internal error")
         )
 
-        messages = [{"role": "user", "content": "Hi"}]
+        messages = [{"role": "user", "content": "search something"}]
         events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
 
         # Content was forwarded
@@ -416,7 +416,7 @@ class TestRunAgentLoopStreamingSSE:
             side_effect=RuntimeError("builder internal error")
         )
 
-        messages = [{"role": "user", "content": "Hi"}]
+        messages = [{"role": "user", "content": "search something"}]
         events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
 
         # No content was forwarded — error status should appear
