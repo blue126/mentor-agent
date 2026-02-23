@@ -95,10 +95,11 @@ registry.register(
     func=generate_learning_plan,
     schema={
         "description": (
-            "Analyze an uploaded book/document and generate a structured learning plan with chapters and sections. "
-            "Use this when the user uploads a PDF and asks to create a study plan, learning roadmap, or wants to know "
-            "what topics the book covers. The tool searches the knowledge base for the document's table of contents, "
-            "extracts the chapter structure using AI, and saves it as a learning plan."
+            "CREATE a NEW learning plan from an uploaded book/document. "
+            "ONLY use this when the user explicitly asks to CREATE or GENERATE a plan "
+            "(e.g., '帮我生成学习计划', 'create a study plan'). "
+            "To VIEW an existing plan, use get_learning_plan instead — NEVER use this tool for viewing. "
+            "WARNING: with force=true, this PERMANENTLY DELETES the existing plan and regenerates from scratch."
         ),
         "parameters": {
             "type": "object",
@@ -124,8 +125,9 @@ registry.register(
                 "force": {
                     "type": "boolean",
                     "description": (
-                        "Set to true to delete an existing learning plan and regenerate it. "
-                        "Use when the previous plan was incorrect or needs updating."
+                        "DANGEROUS: Set to true to PERMANENTLY DELETE the existing plan and regenerate from scratch. "
+                        "ONLY use when the user EXPLICITLY requests regeneration (e.g., '重新生成', 'regenerate'). "
+                        "Never set force=true on your own initiative."
                     ),
                     "default": False,
                 },
@@ -141,11 +143,11 @@ registry.register(
     func=get_learning_plan,
     schema={
         "description": (
-            "Retrieve existing learning plans from the knowledge graph. "
-            "Use this when the user asks 'What's next?', 'Show my learning plan', "
-            "or wants to review their study progress. "
-            "Without a topic_name, lists all available plans. "
-            "With a topic_name, shows the detailed chapter/section structure."
+            "VIEW existing learning plans. This is the PRIMARY tool for all plan-related queries. "
+            "Use this when the user asks to see, show, review, or check their learning plan. "
+            "Without topic_name: lists all available plans with concept counts. "
+            "With topic_name: shows the detailed chapter/section structure for that plan. "
+            "Always try this tool FIRST before considering generate_learning_plan."
         ),
         "parameters": {
             "type": "object",

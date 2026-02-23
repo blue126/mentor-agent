@@ -324,15 +324,29 @@ async def _resolve_plan_display(topic: dict, session, *, status: str = "Existing
 
 
 async def _find_existing_topic(session, normalized_name: str) -> dict | None:
-    """Find topic by exact name, then case-insensitive fallback."""
+    """Find topic by exact name, case-insensitive, then substring fallback."""
+    # Pass 1: exact name match
     existing = await graph_service.get_topic_by_name(session, normalized_name)
-    if existing is None:
-        all_topics = await graph_service.get_all_topics(session)
-        for t in all_topics:
-            if t["name"].strip().lower() == normalized_name.lower():
-                existing = t
-                break
-    return existing
+    if existing is not None:
+        return existing
+
+    # Pass 2: case-insensitive exact match
+    query_lower = normalized_name.lower()
+    all_topics = await graph_service.get_all_topics(session)
+    for t in all_topics:
+        if t["name"].strip().lower() == query_lower:
+            return t
+
+    # Pass 3: substring match (e.g., "Tidy First" matches "Tidy First?")
+    candidates = [
+        t for t in all_topics
+        if query_lower in t["name"].strip().lower()
+        or t["name"].strip().lower() in query_lower
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+
+    return None
 
 
 async def _write_plan_to_db(
@@ -490,6 +504,18 @@ async def _generate_plan_for_file(
     if isinstance(parsed, str):
         return parsed  # error string
 
+    # Data-loss guard: abort if regeneration would lose concepts
+    if old_topic_id is not None:
+        new_concept_count = sum(1 + len(ch.get("sections", [])) for ch in parsed)
+        async with async_session_factory() as session:
+            old_concepts = await graph_service.get_concepts_by_topic(session, old_topic_id)
+        if len(old_concepts) > new_concept_count:
+            logger.warning(
+                "_generate_plan_for_file data-loss guard: existing=%d > new=%d for '%s'",
+                len(old_concepts), new_concept_count, topic_name,
+            )
+            return "data_loss_guard"
+
     # Atomic DB write (build-then-replace)
     async with async_session_factory() as session:
         try:
@@ -544,6 +570,8 @@ async def _generate_plans_batch(
             )
             if result == "skip_existing":
                 results.append(f"\u23ed\ufe0f {name_map[fname]} — already exists (use force=true to regenerate)")
+            elif result == "data_loss_guard":
+                results.append(f"\u26a0\ufe0f {name_map[fname]} — regeneration aborted (new plan has fewer concepts)")
             elif result == "insufficient_chunks":
                 results.append(f"\u274c {name_map[fname]} — insufficient content found")
             elif result.startswith("ok:"):
@@ -721,7 +749,24 @@ async def generate_learning_plan(
             logger.warning("generate_learning_plan failed stage=llm/parse source=%s error=%s", source_name, parsed)
             return parsed
 
-        # 7. Atomic write to DB (build-then-replace for force)
+        # 7. Data-loss guard: abort if regeneration would lose concepts
+        if old_topic_id is not None:
+            new_concept_count = sum(1 + len(ch.get("sections", [])) for ch in parsed)
+            async with async_session_factory() as session:
+                old_concepts = await graph_service.get_concepts_by_topic(session, old_topic_id)
+            if len(old_concepts) > new_concept_count:
+                logger.warning(
+                    "generate_learning_plan data-loss guard: existing=%d > new=%d, aborting for '%s'",
+                    len(old_concepts), new_concept_count, source_name,
+                )
+                return (
+                    f"Regeneration aborted: existing plan has {len(old_concepts)} concepts "
+                    f"but the new plan would only have {new_concept_count}. "
+                    f"This would result in data loss. The existing plan is preserved.\n"
+                    f"Hint: Use get_learning_plan(topic_name='{source_name}') to view the current plan."
+                )
+
+        # 8. Atomic write to DB (build-then-replace for force)
         async with async_session_factory() as session:
             try:
                 await _write_plan_to_db(
@@ -769,10 +814,19 @@ async def get_learning_plan(topic_name: str | None = None) -> str:
                 topic = await _find_existing_topic(session, normalized)
 
                 if topic is None:
+                    # List available names so LLM can self-correct
+                    all_topics = await graph_service.get_all_topics(session)
+                    available = [t["name"] for t in all_topics]
+                    if available:
+                        names_str = ", ".join(f"'{n}'" for n in available)
+                        return (
+                            f"No learning plan found for '{topic_name}'. "
+                            f"Available plans: {names_str}. "
+                            f"Hint: Call get_learning_plan with the exact topic_name from the list above."
+                        )
                     return (
                         f"No learning plan found for '{topic_name}'. "
-                        "Hint: Use generate_learning_plan to create one first, "
-                        "or call get_learning_plan without arguments to see all plans."
+                        "No plans exist yet."
                     )
 
                 return await _resolve_plan_display(topic, session)

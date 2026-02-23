@@ -940,6 +940,8 @@ class TestForceParameter:
         mock_gs.add_topic = AsyncMock(return_value={"id": 100, "name": "Test Book"})
         mock_gs.add_concept = AsyncMock(return_value={"id": 1, "name": "c"})
         mock_gs.load_graph = AsyncMock()
+        # Data-loss guard: existing plan has fewer concepts than new → allow regeneration
+        mock_gs.get_concepts_by_topic = AsyncMock(return_value=[{"name": "old"}])
 
         result = await generate_learning_plan("Test Book", collection_name="test-kb", force=True)
 
