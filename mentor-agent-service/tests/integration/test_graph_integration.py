@@ -58,13 +58,13 @@ async def test_persistence_across_graph_reload(db_session):
     await graph_service.load_graph(db_session)
 
     # Verify MultiDiGraph matches what was persisted
-    G = graph_service._digraph
-    assert G is not None
-    assert a["id"] in G.nodes
-    assert b["id"] in G.nodes
-    assert G.nodes[a["id"]]["name"] == "A"
-    assert G.nodes[b["id"]]["name"] == "B"
-    assert G.has_edge(a["id"], b["id"])
+    digraph = graph_service._digraph
+    assert digraph is not None
+    assert a["id"] in digraph.nodes
+    assert b["id"] in digraph.nodes
+    assert digraph.nodes[a["id"]]["name"] == "A"
+    assert digraph.nodes[b["id"]]["name"] == "B"
+    assert digraph.has_edge(a["id"], b["id"])
 
     # Verify query still works after reload
     prereqs = await graph_service.get_prerequisites(db_session, a["id"])

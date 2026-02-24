@@ -7,6 +7,16 @@ Covers: (a) no tool_use direct text, (b) single tool_use round, (c) multi-round 
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.config import ProviderConfig
+
+_TEST_PROVIDER = ProviderConfig(
+    id="test-model",
+    display_name="Test Model",
+    base_url="http://litellm",
+    api_key="test-key",
+    model="openai/test-model",
+)
+
 # --- Mock response helpers ---
 
 def _make_text_response(content="Hello", finish_reason="stop"):
@@ -60,7 +70,7 @@ class TestRunAgentLoop:
         mock_llm.get_chat_completion_with_tools = AsyncMock(return_value=text_resp)
 
         messages = [{"role": "user", "content": "Hi"}]
-        result = await run_agent_loop(messages)
+        result = await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         assert result is text_resp
         mock_llm.get_chat_completion_with_tools.assert_called_once()
@@ -82,7 +92,7 @@ class TestRunAgentLoop:
         mock_registry.list_tools.return_value = ["echo"]
 
         messages = [{"role": "user", "content": "Echo hello"}]
-        result = await run_agent_loop(messages)
+        result = await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         assert result is text_resp
         assert mock_llm.get_chat_completion_with_tools.call_count == 2
@@ -109,7 +119,7 @@ class TestRunAgentLoop:
         mock_registry.list_tools.return_value = ["echo"]
 
         messages = [{"role": "user", "content": "Do two echoes"}]
-        result = await run_agent_loop(messages)
+        result = await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         assert result is text_resp
         assert mock_llm.get_chat_completion_with_tools.call_count == 3
@@ -134,7 +144,7 @@ class TestRunAgentLoop:
         mock_registry.list_tools.return_value = ["echo"]
 
         messages = [{"role": "user", "content": "Loop forever"}]
-        result = await run_agent_loop(messages)
+        result = await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         assert isinstance(result, str)
         assert "maximum iterations" in result
@@ -155,7 +165,7 @@ class TestRunAgentLoop:
         mock_registry.list_tools.return_value = ["echo"]
 
         messages = [{"role": "user", "content": "Use unknown tool"}]
-        result = await run_agent_loop(messages)
+        result = await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         assert result is text_resp
         # Verify error message was sent back
@@ -181,7 +191,7 @@ class TestRunAgentLoop:
         mock_registry.list_tools.return_value = ["echo"]
 
         messages = [{"role": "user", "content": "Crash the tool"}]
-        result = await run_agent_loop(messages)
+        result = await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         assert result is text_resp
         tool_messages = [m for m in messages if m.get("role") == "tool"]
@@ -201,7 +211,7 @@ class TestRunAgentLoop:
         mock_registry.list_tools.return_value = ["echo"]
 
         messages = [{"role": "user", "content": "Send bad JSON"}]
-        result = await run_agent_loop(messages)
+        result = await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         assert result is text_resp
         tool_messages = [m for m in messages if m.get("role") == "tool"]
@@ -216,7 +226,7 @@ class TestRunAgentLoop:
         mock_llm.get_all_schemas = MagicMock(return_value=[])
 
         messages = [{"role": "user", "content": "Hi"}]
-        result = await run_agent_loop(messages)
+        result = await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         assert isinstance(result, str)
         assert "Error" in result
@@ -247,7 +257,7 @@ class TestRunAgentLoopStreaming:
 
         messages = [{"role": "user", "content": "Hi"}]
         events = []
-        async for event in run_agent_loop_streaming(messages):
+        async for event in run_agent_loop_streaming(messages, provider=_TEST_PROVIDER):
             events.append(event)
 
         assert any("data: [DONE]" in e for e in events)
@@ -289,7 +299,7 @@ class TestRunAgentLoopStreaming:
 
         messages = [{"role": "user", "content": "Echo hi streaming"}]
         events = []
-        async for event in run_agent_loop_streaming(messages):
+        async for event in run_agent_loop_streaming(messages, provider=_TEST_PROVIDER):
             events.append(event)
 
         assert any("data: [DONE]" in e for e in events)
@@ -311,7 +321,7 @@ class TestRunAgentLoopStreaming:
 
         messages = [{"role": "user", "content": "Hi"}]
         events = []
-        async for event in run_agent_loop_streaming(messages):
+        async for event in run_agent_loop_streaming(messages, provider=_TEST_PROVIDER):
             events.append(event)
 
         assert any("connection refused" in e for e in events)
@@ -362,6 +372,7 @@ class TestRunAgentLoopStreaming:
         events = []
         async for event in run_agent_loop_streaming(
             messages=[{"role": "user", "content": "search test"}],
+            provider=_TEST_PROVIDER,
         ):
             events.append(event)
 
@@ -431,6 +442,7 @@ class TestRunAgentLoopStreaming:
         events = []
         async for event in run_agent_loop_streaming(
             messages=[{"role": "user", "content": "search test"}],
+            provider=_TEST_PROVIDER,
         ):
             events.append(event)
 
@@ -489,6 +501,7 @@ class TestRunAgentLoopStreaming:
         events = []
         async for event in run_agent_loop_streaming(
             messages=[{"role": "user", "content": "search test"}],
+            provider=_TEST_PROVIDER,
         ):
             events.append(event)
 
@@ -640,7 +653,7 @@ class TestFastPathStreaming:
 
         messages = [{"role": "user", "content": "你好"}]
         events = []
-        async for event in run_agent_loop_streaming(messages):
+        async for event in run_agent_loop_streaming(messages, provider=_TEST_PROVIDER):
             events.append(event)
 
         event_text = "".join(events)
@@ -688,7 +701,7 @@ class TestFastPathStreaming:
         # Message contains "echo" keyword → tool loop
         messages = [{"role": "user", "content": "echo hello"}]
         events = []
-        async for event in run_agent_loop_streaming(messages):
+        async for event in run_agent_loop_streaming(messages, provider=_TEST_PROVIDER):
             events.append(event)
 
         event_text = "".join(events)

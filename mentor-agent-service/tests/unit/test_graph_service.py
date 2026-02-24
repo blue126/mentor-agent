@@ -24,10 +24,10 @@ class TestGraphService:
         graph_service.reset_graph()
         await graph_service.load_graph(db_session)
 
-        G = graph_service._digraph
-        assert G is not None
-        assert result["id"] in G.nodes
-        assert G.nodes[result["id"]]["name"] == "Decorator"
+        digraph = graph_service._digraph
+        assert digraph is not None
+        assert result["id"] in digraph.nodes
+        assert digraph.nodes[result["id"]]["name"] == "Decorator"
 
     async def test_add_edge(self, db_session):
         a = await graph_service.add_concept(db_session, "A")
@@ -38,8 +38,8 @@ class TestGraphService:
         assert edge["target_concept_id"] == b["id"]
         assert edge["relationship_type"] == "prerequisite"
 
-        G = graph_service._digraph
-        assert G.has_edge(a["id"], b["id"])
+        digraph = graph_service._digraph
+        assert digraph.has_edge(a["id"], b["id"])
 
     async def test_get_prerequisites(self, db_session):
         a = await graph_service.add_concept(db_session, "A")
@@ -84,10 +84,10 @@ class TestGraphService:
         graph_service.reset_graph()
         await graph_service.load_graph(db_session)
 
-        G = graph_service._digraph
-        assert a["id"] in G.nodes
-        assert b["id"] in G.nodes
-        assert G.has_edge(a["id"], b["id"])
+        digraph = graph_service._digraph
+        assert a["id"] in digraph.nodes
+        assert b["id"] in digraph.nodes
+        assert digraph.has_edge(a["id"], b["id"])
 
     async def test_add_topic(self, db_session):
         result = await graph_service.add_topic(db_session, "Python", description="Python programming")
@@ -133,9 +133,9 @@ class TestGraphService:
         await graph_service.add_edge(db_session, a["id"], b["id"], "prerequisite")
         await graph_service.add_edge(db_session, a["id"], b["id"], "related")
 
-        G = graph_service._digraph
+        digraph = graph_service._digraph
         # MultiDiGraph should have 2 edges between A and B
-        assert G.number_of_edges(a["id"], b["id"]) == 2
+        assert digraph.number_of_edges(a["id"], b["id"]) == 2
 
     async def test_duplicate_edge_raises(self, db_session):
         a = await graph_service.add_concept(db_session, "A")
@@ -222,10 +222,10 @@ class TestGraphService:
     async def test_add_concept_auto_commit_false_then_commit(self, db_session):
         """auto_commit=False then manual commit should persist."""
         topic = await graph_service.add_topic(db_session, "T1")
-        c1 = await graph_service.add_concept(
+        await graph_service.add_concept(
             db_session, "C1", topic_id=topic["id"], auto_commit=False
         )
-        c2 = await graph_service.add_concept(
+        await graph_service.add_concept(
             db_session, "C2", topic_id=topic["id"], auto_commit=False
         )
         await db_session.commit()
@@ -299,5 +299,5 @@ class TestGraphService:
         assert isinstance(edge["id"], int)
 
         # Verify in-memory graph has the edge
-        G = graph_service._digraph
-        assert G.has_edge(a["id"], b["id"])
+        digraph = graph_service._digraph
+        assert digraph.has_edge(a["id"], b["id"])

@@ -4,14 +4,11 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from app.tools.extract_relationships_tool import (
     _format_relationships_output,
     _parse_and_validate_relationships,
     extract_concept_relationships,
 )
-
 
 # --- Helper fixtures and constants ---
 
@@ -134,7 +131,10 @@ class TestExtractConceptRelationships:
         mock_gs.get_topic_by_name = AsyncMock(return_value=_TOPIC)
         mock_gs.get_concepts_by_topic = AsyncMock(return_value=_CONCEPTS)
         mock_gs.get_edges_for_concepts = AsyncMock(return_value=[])
-        mock_gs.add_edge = AsyncMock(return_value={"id": 1, "source_concept_id": 10, "target_concept_id": 11, "relationship_type": "prerequisite"})
+        mock_gs.add_edge = AsyncMock(return_value={
+            "id": 1, "source_concept_id": 10, "target_concept_id": 11,
+            "relationship_type": "prerequisite",
+        })
         mock_gs.load_graph = AsyncMock()
         mock_llm.return_value = _VALID_LLM_JSON
 
@@ -243,7 +243,10 @@ class TestExtractConceptRelationships:
         mock_gs.get_topic_by_name = AsyncMock(return_value=_TOPIC)
         mock_gs.get_concepts_by_topic = AsyncMock(return_value=_CONCEPTS)
         mock_gs.get_edges_for_concepts = AsyncMock(return_value=[])
-        mock_gs.add_edge = AsyncMock(return_value={"id": 1, "source_concept_id": 10, "target_concept_id": 11, "relationship_type": "related"})
+        mock_gs.add_edge = AsyncMock(return_value={
+            "id": 1, "source_concept_id": 10, "target_concept_id": 11,
+            "relationship_type": "related",
+        })
         mock_gs.load_graph = AsyncMock()
 
         # One valid, one with unknown concept
@@ -267,10 +270,14 @@ class TestExtractConceptRelationships:
         mock_gs.get_topic_by_name = AsyncMock(return_value=_TOPIC)
         mock_gs.get_concepts_by_topic = AsyncMock(return_value=_CONCEPTS)
         # One existing edge matches LLM output
-        mock_gs.get_edges_for_concepts = AsyncMock(return_value=[
-            {"id": 99, "source_concept_id": 12, "target_concept_id": 10, "relationship_type": "prerequisite", "weight": 1.0},
-        ])
-        mock_gs.add_edge = AsyncMock(return_value={"id": 1, "source_concept_id": 10, "target_concept_id": 11, "relationship_type": "prerequisite"})
+        mock_gs.get_edges_for_concepts = AsyncMock(return_value=[{
+            "id": 99, "source_concept_id": 12, "target_concept_id": 10,
+            "relationship_type": "prerequisite", "weight": 1.0,
+        }])
+        mock_gs.add_edge = AsyncMock(return_value={
+            "id": 1, "source_concept_id": 10, "target_concept_id": 11,
+            "relationship_type": "prerequisite",
+        })
         mock_gs.load_graph = AsyncMock()
         mock_llm.return_value = _VALID_LLM_JSON
 
@@ -319,8 +326,14 @@ class TestExtractConceptRelationships:
 class TestFormatRelationshipsOutput:
     def test_format_output(self):
         rels = [
-            {"source_id": 12, "target_id": 10, "type": "prerequisite", "source_name": "Functions", "target_name": "Variables"},
-            {"source_id": 10, "target_id": 11, "type": "related", "source_name": "Variables", "target_name": "Data Types"},
+            {
+                "source_id": 12, "target_id": 10, "type": "prerequisite",
+                "source_name": "Functions", "target_name": "Variables",
+            },
+            {
+                "source_id": 10, "target_id": 11, "type": "related",
+                "source_name": "Variables", "target_name": "Data Types",
+            },
         ]
         result = _format_relationships_output("Python Basics", rels, created_count=2, skipped_count=0)
 

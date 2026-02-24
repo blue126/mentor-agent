@@ -1,10 +1,9 @@
 """Integration tests for extract_concept_relationships — real DB, mock LLM."""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from app.services import graph_service
-
 
 _VALID_RELATIONSHIPS_JSON = json.dumps([
     {"source": "Functions", "target": "Variables", "type": "prerequisite"},
@@ -76,9 +75,9 @@ async def test_full_flow_edges_in_db_and_networkx(mock_llm, db_session):
     assert "related" in edge_types
 
     # Verify NetworkX graph has edges
-    G = graph_service._digraph
-    assert G is not None
-    assert G.number_of_edges() == 3
+    digraph = graph_service._digraph
+    assert digraph is not None
+    assert digraph.number_of_edges() == 3
 
     # Verify get_prerequisites works correctly
     concepts = await graph_service.get_concepts_by_topic(db_session, topic["id"])

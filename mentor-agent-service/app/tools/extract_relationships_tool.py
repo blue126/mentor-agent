@@ -5,13 +5,16 @@ import json
 import logging
 import time
 
+from app.config import get_providers
 from app.dependencies import async_session_factory
 from app.services import graph_service
 from app.services.llm_service import get_chat_completion
 
 logger = logging.getLogger(__name__)
 
-RELATIONSHIP_EXTRACTION_PROMPT = """Analyze the following list of concepts from a learning material. Identify relationships between them.
+RELATIONSHIP_EXTRACTION_PROMPT = """\
+Analyze the following list of concepts from a learning material. \
+Identify relationships between them.
 
 There are two types of relationships:
 1. **prerequisite**: Concept A requires understanding of Concept B first (A depends on B).
@@ -245,6 +248,7 @@ async def extract_concept_relationships(topic_name: str) -> str:
                                 concepts=concept_list_text
                             ),
                         }],
+                        provider=get_providers()[0],
                         max_tokens=4000,
                     ),
                     timeout=_LLM_TIMEOUT_SECONDS,

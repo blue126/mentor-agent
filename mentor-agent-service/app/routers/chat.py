@@ -5,7 +5,7 @@ import time
 from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.config import settings
+from app.config import get_providers, resolve_provider
 from app.schemas.chat import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -18,37 +18,53 @@ from app.services import agent_service
 router = APIRouter()
 
 
-def _model_payload(model_id: str) -> dict[str, str | int]:
+def _model_payload(provider_id: str, display_name: str) -> dict[str, str | int]:
     return {
-        "id": model_id,
+        "id": provider_id,
         "object": "model",
         "created": int(time.time()),
-        "owned_by": "mentor-agent-service",
+        "owned_by": display_name,
     }
 
 
 @router.get("/v1/models")
 async def list_models() -> JSONResponse:
-    model_id = settings.litellm_model
-    return JSONResponse(content={"object": "list", "data": [_model_payload(model_id)]})
+    providers = get_providers()
+    return JSONResponse(
+        content={
+            "object": "list",
+            "data": [_model_payload(p.id, p.display_name) for p in providers],
+        }
+    )
 
 
 @router.get("/v1/models/{model_id}")
 async def get_model(model_id: str) -> JSONResponse:
-    if model_id != settings.litellm_model:
-        return JSONResponse(status_code=404, content={"error": {"message": "Model not found", "type": "not_found_error"}})
-    return JSONResponse(content=_model_payload(model_id))
+    provider = resolve_provider(model_id)
+    if provider is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"message": f"Model not found: {model_id}", "type": "not_found_error"}},
+        )
+    return JSONResponse(content=_model_payload(provider.id, provider.display_name))
 
 
 @router.post("/v1/chat/completions", response_model=None)
 async def chat_completions(request: ChatCompletionRequest) -> Response:
+    provider = resolve_provider(request.model)
+    if provider is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": {"message": f"Model not found: {request.model}", "type": "not_found_error"}},
+        )
+
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
     if request.stream:
         return StreamingResponse(
             agent_service.run_agent_loop_streaming(
                 messages=messages,
-                model=request.model,
+                provider=provider,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
             ),
@@ -62,7 +78,7 @@ async def chat_completions(request: ChatCompletionRequest) -> Response:
     else:
         result = await agent_service.run_agent_loop(
             messages=messages,
-            model=request.model,
+            provider=provider,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
         )
@@ -75,7 +91,7 @@ async def chat_completions(request: ChatCompletionRequest) -> Response:
                 content={"error": {"message": "Error: LLM returned empty choices", "type": "proxy_error"}},
             )
 
-        selected_model = request.model or getattr(result, "model", "") or ""
+        selected_model = provider.id
 
         usage_obj = getattr(result, "usage", None)
         response = ChatCompletionResponse(

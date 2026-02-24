@@ -3,8 +3,10 @@
 import asyncio
 import json
 import logging
+import re
 import time
 
+from app.config import get_providers
 from app.dependencies import async_session_factory
 from app.services import graph_service
 from app.services.llm_service import get_chat_completion
@@ -323,8 +325,41 @@ async def _resolve_plan_display(topic: dict, session, *, status: str = "Existing
     return _format_plan_from_db(topic["name"], concepts)
 
 
+def _tokenize_name(name: str) -> set[str]:
+    """Extract meaningful word tokens from a topic name for fuzzy comparison.
+
+    Strips punctuation, lowercases, and removes common noise tokens (site domains,
+    single-char tokens like initials). The resulting set is order-independent,
+    so "Ousterhout, John" and "John K. Ousterhout" produce equivalent sets.
+
+    Examples:
+        "A Philosophy of Software Design, 2nd Edition (Ousterhout, John) (z-library.sk, 1lib.sk)"
+        -> {"philosophy", "software", "design", "2nd", "edition", "ousterhout", "john", ...}
+    """
+    # Noise domains that appear in z-library download filenames
+    _NOISE_TOKENS = {"z-library", "1lib", "z-lib", "sk", "org", "com"}
+    # Split on non-alphanumeric (except hyphens within words)
+    raw_tokens = re.findall(r"[a-zA-Z0-9][\w-]*[a-zA-Z0-9]|[a-zA-Z0-9]", name.lower())
+    return {t for t in raw_tokens if len(t) > 1 and t not in _NOISE_TOKENS}
+
+
+def _name_similarity(name_a: str, name_b: str) -> float:
+    """Jaccard similarity between tokenized names. Returns 0.0-1.0."""
+    tokens_a = _tokenize_name(name_a)
+    tokens_b = _tokenize_name(name_b)
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+
+
+# Threshold for Pass 4 fuzzy match. 0.8 is strict enough to avoid matching
+# genuinely different books while tolerating author name reordering, middle
+# initials, and site-domain noise.
+_FUZZY_MATCH_THRESHOLD = 0.8
+
+
 async def _find_existing_topic(session, normalized_name: str) -> dict | None:
-    """Find topic by exact name, case-insensitive, then substring fallback."""
+    """Find topic by exact name, case-insensitive, substring, then fuzzy fallback."""
     # Pass 1: exact name match
     existing = await graph_service.get_topic_by_name(session, normalized_name)
     if existing is not None:
@@ -345,6 +380,16 @@ async def _find_existing_topic(session, normalized_name: str) -> dict | None:
     ]
     if len(candidates) == 1:
         return candidates[0]
+
+    # Pass 4: fuzzy word-set match — handles author name reordering,
+    # middle initials, punctuation differences.
+    # e.g., "Book (Ousterhout, John)" matches "Book (John K. Ousterhout)"
+    fuzzy_candidates = [
+        t for t in all_topics
+        if _name_similarity(normalized_name, t["name"]) >= _FUZZY_MATCH_THRESHOLD
+    ]
+    if len(fuzzy_candidates) == 1:
+        return fuzzy_candidates[0]
 
     return None
 
@@ -398,6 +443,7 @@ async def _run_llm_analysis(toc_text: str) -> str | list[dict]:
         plan_json = await asyncio.wait_for(
             get_chat_completion(
                 messages=[{"role": "user", "content": prompt}],
+                provider=get_providers()[0],
                 max_tokens=2000,
             ),
             timeout=_LLM_TIMEOUT_SECONDS,

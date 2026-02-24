@@ -1,8 +1,8 @@
 # 双路径架构迁移评估报告
 
-Status: Proposed
+Status: Implemented
 Baseline Profile: subscription (claude-max-proxy)
-Last validated: 2026-02-20
+Last validated: 2026-02-23
 
 ## 1. 背景
 

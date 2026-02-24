@@ -6,11 +6,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import ASGITransport, AsyncClient
 
+from app.config import ProviderConfig
 from app.main import create_app
 from app.tools import registry
 from tests.test_doubles import MockChunk
 
 _VALID_TOKEN = "test-secret-key"
+
+_TEST_PROVIDER = ProviderConfig(
+    id="test-model",
+    display_name="Test Model",
+    base_url="http://litellm",
+    api_key="test-key",
+    model="openai/test-model",
+)
 
 
 # Test 1: search_knowledge_base registered in registry
@@ -47,7 +56,7 @@ def test_rag_tools_schemas_complete():
 
 # Test 4: Agent loop integration — mock LLM calls search_knowledge_base, mock Open WebUI returns results
 async def test_agent_loop_rag_tool_use():
-    """Full flow: LLM returns tool_use for search_knowledge_base → tool executes → result injected → LLM final answer."""
+    """Full flow: LLM returns tool_use for search_knowledge_base → tool executes → LLM final answer."""
     ac = AsyncClient(
         transport=ASGITransport(app=create_app()),
         base_url="http://test",
@@ -106,6 +115,7 @@ async def test_agent_loop_rag_tool_use():
         patch("app.services.agent_service.litellm") as mock_agent_litellm,
         patch("app.tools.search_knowledge_base_tool.httpx.AsyncClient", return_value=mock_httpx_client),
         patch("app.tools.search_knowledge_base_tool.settings") as mock_tool_settings,
+        patch("app.routers.chat.resolve_provider", return_value=_TEST_PROVIDER),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_tool_settings.openwebui_api_key = "test-webui-key"

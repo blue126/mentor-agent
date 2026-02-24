@@ -6,11 +6,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import ASGITransport, AsyncClient
 
+from app.config import ProviderConfig
 from app.main import create_app
 from tests.test_doubles import MockChunk
 
 _VALID_TOKEN = "test-secret-key"
 _MESSAGES_PAYLOAD = {"messages": [{"role": "user", "content": "Hello"}], "model": "test-model"}
+
+_TEST_PROVIDER = ProviderConfig(
+    id="test-model",
+    display_name="Test Model",
+    base_url="http://litellm",
+    api_key="test-key",
+    model="openai/test-model",
+)
+
 
 async def _mock_stream_response(*chunks: MockChunk) -> AsyncIterator[MockChunk]:
     for chunk in chunks:
@@ -56,6 +66,20 @@ def _make_stream_aware_mock(non_stream_response, stream_response):
     return _side_effect
 
 
+def _patch_resolve_provider():
+    """Patch resolve_provider so 'test-model' maps to _TEST_PROVIDER."""
+    def _mock_resolve(model_id):
+        if not model_id or model_id == "test-model":
+            return _TEST_PROVIDER
+        return None
+    return patch("app.routers.chat.resolve_provider", side_effect=_mock_resolve)
+
+
+def _patch_get_providers():
+    """Patch get_providers to return _TEST_PROVIDER."""
+    return patch("app.routers.chat.get_providers", return_value=[_TEST_PROVIDER])
+
+
 async def test_streaming_chat_returns_sse_format():
     """Full streaming request should return valid SSE events ending with [DONE]."""
     ac, app = _build_client()
@@ -69,6 +93,7 @@ async def test_streaming_chat_returns_sse_format():
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.agent_service.litellm") as mock_agent_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
@@ -105,6 +130,7 @@ async def test_non_streaming_chat_returns_json():
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)
@@ -150,6 +176,7 @@ async def test_llm_failure_streaming_returns_error_in_sse():
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=Exception("Connection refused"))
@@ -178,6 +205,7 @@ async def test_non_streaming_empty_choices_returns_502():
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)
@@ -205,6 +233,7 @@ async def test_non_streaming_null_usage_returns_200():
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)
@@ -240,3 +269,145 @@ async def test_invalid_role_returns_422():
             )
 
     assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# New tests for double active provider (Story 1.6)
+# ---------------------------------------------------------------------------
+
+_ALT_PROVIDER = ProviderConfig(
+    id="mentor-api",
+    display_name="Mentor (API)",
+    base_url="https://api.anthropic.com",
+    api_key="sk-ant-xxx",
+    model="claude-sonnet-4-6",
+)
+
+
+async def test_list_models_returns_two_when_double_active():
+    """AC #1: /v1/models returns two models when double active configured."""
+    ac, _ = _build_client()
+
+    with (
+        patch("app.dependencies.settings") as mock_dep_settings,
+        patch("app.routers.chat.get_providers", return_value=[_TEST_PROVIDER, _ALT_PROVIDER]),
+    ):
+        mock_dep_settings.agent_api_key = _VALID_TOKEN
+        async with ac:
+            resp = await ac.get(
+                "/v1/models",
+                headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
+            )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object"] == "list"
+    assert len(data["data"]) == 2
+    ids = [m["id"] for m in data["data"]]
+    assert "test-model" in ids
+    assert "mentor-api" in ids
+    owned = {m["id"]: m["owned_by"] for m in data["data"]}
+    assert owned["test-model"] == "Test Model"
+    assert owned["mentor-api"] == "Mentor (API)"
+
+
+async def test_chat_completions_routes_to_correct_provider():
+    """AC #2: chat completions routes to correct provider based on model parameter."""
+    ac, _ = _build_client()
+
+    mock_response = _make_text_response("API response")
+
+    def _mock_resolve(model_id):
+        if model_id == "mentor-api":
+            return _ALT_PROVIDER
+        if not model_id or model_id == "test-model":
+            return _TEST_PROVIDER
+        return None
+
+    with (
+        patch("app.dependencies.settings") as mock_dep_settings,
+        patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.routers.chat.resolve_provider", side_effect=_mock_resolve),
+    ):
+        mock_dep_settings.agent_api_key = _VALID_TOKEN
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+
+        async with ac:
+            resp = await ac.post(
+                "/v1/chat/completions",
+                json={"messages": [{"role": "user", "content": "Hello"}], "model": "mentor-api", "stream": False},
+                headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
+            )
+
+    assert resp.status_code == 200
+    # Verify the acompletion was called with the alt provider's config
+    call_kwargs = mock_litellm.acompletion.call_args.kwargs
+    assert call_kwargs["api_base"] == "https://api.anthropic.com"
+    assert call_kwargs["api_key"] == "sk-ant-xxx"
+    assert call_kwargs["model"] == "claude-sonnet-4-6"
+
+
+async def test_chat_completions_unknown_model_returns_404():
+    """AC #8: chat completions with unknown model ID returns 404."""
+    ac, _ = _build_client()
+
+    with (
+        patch("app.dependencies.settings") as mock_dep_settings,
+        patch("app.routers.chat.resolve_provider", return_value=None),
+    ):
+        mock_dep_settings.agent_api_key = _VALID_TOKEN
+
+        async with ac:
+            resp = await ac.post(
+                "/v1/chat/completions",
+                json={"messages": [{"role": "user", "content": "Hello"}], "model": "nonexistent", "stream": False},
+                headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
+            )
+
+    assert resp.status_code == 404
+    data = resp.json()
+    assert data["error"]["type"] == "not_found_error"
+    assert "nonexistent" in data["error"]["message"]
+
+
+async def test_get_model_returns_200_for_configured_provider():
+    """AC #8: GET /v1/models/{model_id} returns 200 for configured provider."""
+    ac, _ = _build_client()
+
+    with (
+        patch("app.dependencies.settings") as mock_dep_settings,
+        patch("app.routers.chat.resolve_provider", return_value=_TEST_PROVIDER),
+    ):
+        mock_dep_settings.agent_api_key = _VALID_TOKEN
+
+        async with ac:
+            resp = await ac.get(
+                "/v1/models/test-model",
+                headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
+            )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] == "test-model"
+    assert data["owned_by"] == "Test Model"
+
+
+async def test_get_model_returns_404_for_unknown():
+    """AC #8: GET /v1/models/{model_id} returns 404 for unknown IDs."""
+    ac, _ = _build_client()
+
+    with (
+        patch("app.dependencies.settings") as mock_dep_settings,
+        patch("app.routers.chat.resolve_provider", return_value=None),
+    ):
+        mock_dep_settings.agent_api_key = _VALID_TOKEN
+
+        async with ac:
+            resp = await ac.get(
+                "/v1/models/nonexistent",
+                headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
+            )
+
+    assert resp.status_code == 404
+    data = resp.json()
+    assert data["error"]["type"] == "not_found_error"

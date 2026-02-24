@@ -26,10 +26,10 @@ async def load_graph(session: AsyncSession) -> None:
     global _digraph  # noqa: PLW0603
     repo = GraphRepository(session)
 
-    G = nx.MultiDiGraph()
+    graph = nx.MultiDiGraph()
 
     for concept in await repo.get_all_concepts():
-        G.add_node(
+        graph.add_node(
             concept["id"],
             name=concept["name"],
             definition=concept["definition"],
@@ -38,7 +38,7 @@ async def load_graph(session: AsyncSession) -> None:
         )
 
     for edge in await repo.get_all_edges():
-        G.add_edge(
+        graph.add_edge(
             edge["source_concept_id"],
             edge["target_concept_id"],
             key=edge["id"],
@@ -46,8 +46,8 @@ async def load_graph(session: AsyncSession) -> None:
             weight=edge["weight"],
         )
 
-    _digraph = G
-    logger.info("Graph loaded: %d nodes, %d edges", G.number_of_nodes(), G.number_of_edges())
+    _digraph = graph
+    logger.info("Graph loaded: %d nodes, %d edges", graph.number_of_nodes(), graph.number_of_edges())
 
 
 async def _ensure_loaded(session: AsyncSession) -> nx.MultiDiGraph:
@@ -154,8 +154,8 @@ async def add_concept(
         await session.commit()
         # Update in-memory graph (commit succeeded, safe to update memory)
         try:
-            G = await _ensure_loaded(session)
-            G.add_node(
+            graph = await _ensure_loaded(session)
+            graph.add_node(
                 concept_id,
                 name=name,
                 definition=definition,
@@ -213,8 +213,8 @@ async def add_edge(
 
         # Update in-memory graph
         try:
-            G = await _ensure_loaded(session)
-            G.add_edge(
+            graph = await _ensure_loaded(session)
+            graph.add_edge(
                 source_concept_id,
                 target_concept_id,
                 key=edge_id,
@@ -244,15 +244,15 @@ async def get_prerequisites(session: AsyncSession, concept_id: int) -> list[dict
     Edge direction: source→target means "source depends on target".
     get_prerequisites(A) returns targets of A's outgoing prerequisite edges.
     """
-    G = await _ensure_loaded(session)
+    graph = await _ensure_loaded(session)
 
-    if concept_id not in G:
+    if concept_id not in graph:
         return []
 
     prerequisites = []
-    for _, target, data in G.out_edges(concept_id, data=True):
+    for _, target, data in graph.out_edges(concept_id, data=True):
         if data.get("relationship_type") == "prerequisite":
-            node_data = G.nodes[target]
+            node_data = graph.nodes[target]
             prerequisites.append({"id": target, **node_data})
 
     return prerequisites
@@ -263,36 +263,36 @@ async def get_related_concepts(session: AsyncSession, concept_id: int) -> list[d
 
     Searches both outgoing and incoming edges with type="related".
     """
-    G = await _ensure_loaded(session)
+    graph = await _ensure_loaded(session)
 
-    if concept_id not in G:
+    if concept_id not in graph:
         return []
 
     related: dict[int, dict[str, Any]] = {}
 
     # Outgoing related edges
-    for _, target, data in G.out_edges(concept_id, data=True):
+    for _, target, data in graph.out_edges(concept_id, data=True):
         if data.get("relationship_type") == "related":
-            related[target] = {"id": target, **G.nodes[target]}
+            related[target] = {"id": target, **graph.nodes[target]}
 
     # Incoming related edges
-    for source, _, data in G.in_edges(concept_id, data=True):
+    for source, _, data in graph.in_edges(concept_id, data=True):
         if data.get("relationship_type") == "related":
-            related[source] = {"id": source, **G.nodes[source]}
+            related[source] = {"id": source, **graph.nodes[source]}
 
     return list(related.values())
 
 
 async def get_concept_graph_summary(session: AsyncSession) -> str:
     """Return a summary string of the graph (node count, edge count, topics)."""
-    G = await _ensure_loaded(session)
+    graph = await _ensure_loaded(session)
     repo = GraphRepository(session)
 
     topics = await repo.get_all_topics()
     topic_names = [t["name"] for t in topics]
 
     return (
-        f"Knowledge graph: {G.number_of_nodes()} concepts, "
-        f"{G.number_of_edges()} edges, "
+        f"Knowledge graph: {graph.number_of_nodes()} concepts, "
+        f"{graph.number_of_edges()} edges, "
         f"{len(topic_names)} topics ({', '.join(topic_names) if topic_names else 'none'})"
     )

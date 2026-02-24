@@ -12,10 +12,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import ASGITransport, AsyncClient
 
+from app.config import ProviderConfig
 from app.main import create_app
 from tests.test_doubles import MockChunk
 
 _VALID_TOKEN = "test-secret-key"
+
+_TEST_PROVIDER = ProviderConfig(
+    id="test-model",
+    display_name="Test Model",
+    base_url="http://litellm",
+    api_key="test-key",
+    model="openai/test-model",
+)
+
+
+def _patch_resolve_provider():
+    """Patch resolve_provider so 'test-model' maps to _TEST_PROVIDER."""
+    def _mock_resolve(model_id):
+        if not model_id or model_id == "test-model":
+            return _TEST_PROVIDER
+        return None
+    return patch("app.routers.chat.resolve_provider", side_effect=_mock_resolve)
 
 
 async def _mock_stream(*chunks: MockChunk) -> AsyncIterator[MockChunk]:
@@ -90,6 +108,7 @@ async def test_sse_stream_includes_status_events():
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.agent_service.litellm") as mock_agent_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
@@ -155,6 +174,7 @@ async def test_sse_no_tool_call_no_status_events():
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.agent_service.litellm") as mock_agent_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
@@ -206,6 +226,7 @@ async def test_non_streaming_no_sse_status():
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
@@ -249,6 +270,7 @@ async def test_multi_tool_call_status_per_round():
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.agent_service.litellm") as mock_agent_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
@@ -307,11 +329,11 @@ async def test_sse_stream_includes_heartbeat_when_execution_is_slow():
         patch("app.services.agent_service.settings") as mock_agent_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.agent_service.litellm") as mock_agent_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_agent_settings.max_tool_iterations = 10
         mock_agent_settings.sse_heartbeat_interval = 0.02
-        mock_agent_settings.litellm_model = "test-model"
         mock_litellm.acompletion = AsyncMock(side_effect=_side_effect)
         mock_agent_litellm.stream_chunk_builder = MagicMock(
             side_effect=[tool_resp, text_resp]

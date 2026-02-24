@@ -12,7 +12,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.config import ProviderConfig
 from tests.test_doubles import MockChunk
+
+_TEST_PROVIDER = ProviderConfig(
+    id="test-model",
+    display_name="Test Model",
+    base_url="http://litellm",
+    api_key="test-key",
+    model="openai/test-model",
+)
 
 # --- Mock response helpers (reused from test_agent_service.py) ---
 
@@ -90,7 +99,7 @@ class TestRunAgentLoopStreamingSSE:
         )
 
         messages = [{"role": "user", "content": "Hi"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # Should have content deltas and [DONE], no tool status events
         assert any("data: [DONE]" in e for e in events)
@@ -130,7 +139,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_registry.get_all_schemas.return_value = [{"type": "function", "function": {"name": "echo"}}]
 
         messages = [{"role": "user", "content": "Echo hi"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # Should contain thinking status
         thinking_events = [e for e in events if "Thinking" in e]
@@ -176,7 +185,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_registry.get_all_schemas.return_value = []
 
         messages = [{"role": "user", "content": "Two echoes"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # Two rounds → two thinking + two tool status
         thinking_events = [e for e in events if "Thinking" in e]
@@ -212,7 +221,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_registry.get_all_schemas.return_value = []
 
         messages = [{"role": "user", "content": "echo Loop"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # Should contain max iterations warning
         max_iter_events = [e for e in events if "maximum" in e.lower() or "iterations" in e.lower()]
@@ -250,7 +259,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_registry.get_all_schemas.return_value = []
 
         messages = [{"role": "user", "content": "echo Crash"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # Tool error is fed back to LLM, stream should still complete
         assert any("data: [DONE]" in e for e in events)
@@ -277,7 +286,7 @@ class TestRunAgentLoopStreamingSSE:
         )
 
         messages = [{"role": "user", "content": "Hi"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # Last non-empty event should be [DONE]
         assert events[-1] == "data: [DONE]\n\n"
@@ -297,7 +306,7 @@ class TestRunAgentLoopStreamingSSE:
         )
 
         messages = [{"role": "user", "content": "Hi"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # Should contain error status and [DONE]
         error_events = [e for e in events if "LLM service unavailable" in e]
@@ -333,7 +342,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_registry.get_all_schemas.return_value = []
 
         messages = [{"role": "user", "content": "echo Bad JSON"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # Stream should complete normally
         assert any("data: [DONE]" in e for e in events)
@@ -360,7 +369,7 @@ class TestRunAgentLoopStreamingSSE:
         )
 
         messages = [{"role": "user", "content": "Hi"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         error_events = [e for e in events if "stream interrupted" in e]
         assert len(error_events) >= 1
@@ -386,7 +395,7 @@ class TestRunAgentLoopStreamingSSE:
         )
 
         messages = [{"role": "user", "content": "search something"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # Content was forwarded
         data_events = [e for e in events if e.startswith("data: {")]
@@ -417,7 +426,7 @@ class TestRunAgentLoopStreamingSSE:
         )
 
         messages = [{"role": "user", "content": "search something"}]
-        events = await _collect_events(run_agent_loop_streaming(messages, "test-model"))
+        events = await _collect_events(run_agent_loop_streaming(messages, provider=_TEST_PROVIDER))
 
         # No content was forwarded — error status should appear
         error_events = [e for e in events if "builder internal error" in e]
@@ -442,7 +451,7 @@ class TestRunAgentLoopStreamingSSE:
         mock_llm.stream_chat_completion = AsyncMock(side_effect=_hanging_stream)
 
         messages = [{"role": "user", "content": "Hi"}]
-        gen = run_agent_loop_streaming(messages, "test-model")
+        gen = run_agent_loop_streaming(messages, provider=_TEST_PROVIDER)
 
         first_event = await asyncio.wait_for(anext(gen), timeout=1.0)
         assert first_event.startswith("data: ") and "chatcmpl-heartbeat" in first_event

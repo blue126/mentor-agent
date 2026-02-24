@@ -9,6 +9,16 @@ Covers:
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.config import ProviderConfig
+
+_TEST_PROVIDER = ProviderConfig(
+    id="test-model",
+    display_name="Test Model",
+    base_url="http://litellm",
+    api_key="test-key",
+    model="openai/test-model",
+)
+
 
 def _make_text_response(content="Hello", finish_reason="stop"):
     """Mock a non-tool LLM response."""
@@ -35,7 +45,7 @@ class TestPersonaInjectionNonStreaming:
         mock_llm.get_chat_completion_with_tools = AsyncMock(return_value=text_resp)
 
         messages = [{"role": "user", "content": "Hello"}]
-        await run_agent_loop(messages)
+        await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         # Verify the first message sent to LLM is the system prompt
         call_args = mock_llm.get_chat_completion_with_tools.call_args
@@ -57,7 +67,7 @@ class TestPersonaInjectionNonStreaming:
             {"role": "system", "content": "Existing system prompt"},
             {"role": "user", "content": "Hello"},
         ]
-        await run_agent_loop(messages)
+        await run_agent_loop(messages, provider=_TEST_PROVIDER)
 
         call_args = mock_llm.get_chat_completion_with_tools.call_args
         sent_messages = call_args.kwargs.get("messages") or call_args[1].get("messages") or call_args[0][0]
@@ -95,7 +105,7 @@ class TestPersonaInjectionStreaming:
 
         messages = [{"role": "user", "content": "Hi"}]
         events = []
-        async for event in run_agent_loop_streaming(messages):
+        async for event in run_agent_loop_streaming(messages, provider=_TEST_PROVIDER):
             events.append(event)
 
         # Verify the messages passed to LLM include system prompt at position 0

@@ -13,7 +13,7 @@ from typing import Any
 
 import litellm
 
-from app.config import settings
+from app.config import ProviderConfig, settings
 from app.services import llm_service, prompt_service
 from app.tools import registry
 from app.utils.sse_generator import (
@@ -142,7 +142,7 @@ async def _execute_tool(fn_name: str, fn_args_raw: str) -> str:
 
 async def run_agent_loop(
     messages: list[dict[str, Any]],
-    model: str | None = None,
+    provider: ProviderConfig,
     temperature: float | None = None,
     max_tokens: int | None = None,
 ) -> Any | str:
@@ -157,7 +157,7 @@ async def run_agent_loop(
             messages=messages,
             tools=tools,
             tool_choice="auto",
-            model=model,
+            provider=provider,
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -210,7 +210,7 @@ async def run_agent_loop(
 
 async def run_agent_loop_streaming(
     messages: list[dict[str, Any]],
-    model: str | None = None,
+    provider: ProviderConfig,
     temperature: float | None = None,
     max_tokens: int | None = None,
 ) -> AsyncIterator[str]:
@@ -220,7 +220,7 @@ async def run_agent_loop_streaming(
     status events, content deltas, and [DONE] terminator.
     """
     await _inject_system_prompt(messages)
-    resolved_model = model or settings.litellm_model
+    display_model = provider.display_name
     queue: asyncio.Queue[str | None] = asyncio.Queue()
     done = asyncio.Event()
 
@@ -232,12 +232,12 @@ async def run_agent_loop_streaming(
                 logger.info("fast-path(stream) no tool keywords detected")
                 stream_result = await llm_service.stream_chat_completion(
                     messages=messages,
-                    model=model,
+                    provider=provider,
                     temperature=temperature,
                     max_tokens=max_tokens,
                 )
                 if isinstance(stream_result, str):
-                    await queue.put(make_status_event(f"⚠️ {stream_result}", resolved_model))
+                    await queue.put(make_status_event(f"⚠️ {stream_result}", display_model))
                 else:
                     async for chunk in stream_result:
                         chunk_dict = chunk.model_dump(exclude_none=True)
@@ -257,14 +257,14 @@ async def run_agent_loop_streaming(
                 # Stream with tools + buffer — let LLM decide whether to use them
                 stream_result = await llm_service.stream_chat_completion(
                     messages=messages,
-                    model=model,
+                    provider=provider,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     tools=tools,
                     tool_choice="auto",
                 )
                 if isinstance(stream_result, str):
-                    await queue.put(make_status_event(f"⚠️ {stream_result}", resolved_model))
+                    await queue.put(make_status_event(f"⚠️ {stream_result}", display_model))
                     break
 
                 # Buffer content chunks — only flush on finish_reason="stop".
@@ -299,11 +299,11 @@ async def run_agent_loop_streaming(
                         for event in buffered_content:
                             await queue.put(event)
                     else:
-                        await queue.put(make_status_event(f"⚠️ Error: {exc}", resolved_model))
+                        await queue.put(make_status_event(f"⚠️ Error: {exc}", display_model))
                     break
 
                 if not getattr(rebuilt, "choices", None):
-                    await queue.put(make_status_event("⚠️ Error: LLM returned empty choices", resolved_model))
+                    await queue.put(make_status_event("⚠️ Error: LLM returned empty choices", display_model))
                     break
 
                 choice = rebuilt.choices[0]
@@ -320,7 +320,7 @@ async def run_agent_loop_streaming(
                             iteration + 1,
                         )
 
-                    await queue.put(make_status_event("💭 Thinking...", resolved_model))
+                    await queue.put(make_status_event("💭 Thinking...", display_model))
                     # Append assistant message but strip discarded content so the
                     # next LLM call doesn't see text the user never received.
                     # This prevents "continuation" responses that reference invisible context.
@@ -336,7 +336,7 @@ async def run_agent_loop_streaming(
                             fn_name,
                             tool_call.function.arguments,
                         )
-                        await queue.put(make_status_event(f"🔧 Running {fn_name}...", resolved_model))
+                        await queue.put(make_status_event(f"🔧 Running {fn_name}...", display_model))
                         tool_result = await _execute_tool(fn_name, tool_call.function.arguments)
                         logger.info(
                             "tool-loop(stream) tool_result name=%s result=%s",
@@ -360,13 +360,13 @@ async def run_agent_loop_streaming(
                 # Max iterations reached
                 await queue.put(make_status_event(
                     f"⚠️ Tool loop reached maximum {settings.max_tool_iterations} iterations",
-                    resolved_model,
+                    display_model,
                 ))
 
             await queue.put(make_done_event())
         except Exception as exc:
             logger.exception("Agent loop error: %s", exc)
-            await queue.put(make_status_event(f"⚠️ Error: {exc}", resolved_model))
+            await queue.put(make_status_event(f"⚠️ Error: {exc}", display_model))
             await queue.put(make_done_event())
         finally:
             done.set()

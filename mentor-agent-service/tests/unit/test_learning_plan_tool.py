@@ -11,8 +11,10 @@ from app.tools.learning_plan_tool import (
     _format_plan_from_db,
     _is_section_name,
     _match_filename,
+    _name_similarity,
     _parse_and_validate_plan,
     _stem,
+    _tokenize_name,
     generate_learning_plan,
     get_learning_plan,
 )
@@ -1174,3 +1176,53 @@ class TestGetLearningPlan:
         assert "Odd Book" in result
         # Falls back because plan_data[0] has no "chapter" key
         mock_gs.get_concepts_by_topic.assert_called_once()
+
+
+class TestTokenizeName:
+    """Tests for _tokenize_name — Issue #25 helper."""
+
+    def test_basic(self):
+        tokens = _tokenize_name("Pro Git (Scott Chacon)")
+        assert "pro" in tokens
+        assert "git" in tokens
+        assert "scott" in tokens
+        assert "chacon" in tokens
+
+    def test_noise_removal(self):
+        tokens = _tokenize_name("Book (Author) (z-library.sk, 1lib.sk, z-lib.sk)")
+        assert "sk" not in tokens
+        assert "z-library" not in tokens
+        assert "1lib" not in tokens
+        assert "z-lib" not in tokens
+
+    def test_single_char_ignored(self):
+        # "K" in "John K. Ousterhout" is a single char after stripping dots
+        tokens = _tokenize_name("John K. Ousterhout")
+        assert "john" in tokens
+        assert "ousterhout" in tokens
+
+
+class TestNameSimilarity:
+    """Tests for _name_similarity — Issue #25 fuzzy dedup."""
+
+    def test_author_name_reordering(self):
+        """Same book, author name in different order — should be high similarity."""
+        name_a = "A Philosophy of Software Design, 2nd Edition (Ousterhout, John) (z-library.sk, 1lib.sk, z-lib.sk)"
+        name_b = "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk)"
+        sim = _name_similarity(name_a, name_b)
+        assert sim >= 0.8, f"Expected >= 0.8 but got {sim}"
+
+    def test_identical_names(self):
+        name = "Pro Git (Scott Chacon)"
+        assert _name_similarity(name, name) == 1.0
+
+    def test_completely_different_books(self):
+        """Different books should have low similarity."""
+        name_a = "Pro Git (Scott Chacon, Ben Straub)"
+        name_b = "TEST-DRIVEN DEVELOPMENT BY EXAMPLE (Kent Beck)"
+        sim = _name_similarity(name_a, name_b)
+        assert sim < 0.3, f"Expected < 0.3 but got {sim}"
+
+    def test_empty_string(self):
+        assert _name_similarity("", "Pro Git") == 0.0
+        assert _name_similarity("", "") == 0.0

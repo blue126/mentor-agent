@@ -5,11 +5,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
-logging.basicConfig(level=logging.WARNING, format="%(levelname)s:%(name)s:%(message)s")
-logging.getLogger("app").setLevel(logging.INFO)
-
 from app.dependencies import verify_api_key
 from app.routers import chat, health
+
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s:%(name)s:%(message)s")
+logging.getLogger("app").setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
 

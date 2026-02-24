@@ -10,10 +10,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from httpx import ASGITransport, AsyncClient
 
+from app.config import ProviderConfig
 from app.main import create_app
 from tests.test_doubles import MockChunk
 
 _VALID_TOKEN = "test-secret-key"
+
+_TEST_PROVIDER = ProviderConfig(
+    id="test-model",
+    display_name="Test Model",
+    base_url="http://litellm",
+    api_key="test-key",
+    model="openai/test-model",
+)
+
+
+def _patch_resolve_provider():
+    """Patch resolve_provider so 'test-model' maps to _TEST_PROVIDER."""
+    def _mock_resolve(model_id):
+        if not model_id or model_id == "test-model":
+            return _TEST_PROVIDER
+        return None
+    return patch("app.routers.chat.resolve_provider", side_effect=_mock_resolve)
 _SERVICE_ROOT = Path(__file__).resolve().parents[2]
 _SYSTEM_PROMPT_PATH = str(_SERVICE_ROOT / "app" / "prompts" / "mentor_system_prompt.md")
 _MESSAGES_PAYLOAD = {"messages": [{"role": "user", "content": "Hello"}], "model": "test-model"}
@@ -86,6 +104,7 @@ async def test_non_streaming_includes_persona_directives():
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.prompt_service.settings") as mock_prompt_settings,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_prompt_settings.mentor_mode_enabled = True
@@ -125,6 +144,7 @@ async def test_streaming_includes_persona_directives():
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.agent_service.litellm") as mock_agent_litellm,
         patch("app.services.prompt_service.settings") as mock_prompt_settings,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_prompt_settings.mentor_mode_enabled = True
@@ -162,6 +182,7 @@ async def test_system_prompt_is_first_message():
     with (
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)
@@ -191,6 +212,7 @@ async def test_mentor_mode_disabled_uses_neutral_prompt():
         patch("app.dependencies.settings") as mock_dep_settings,
         patch("app.services.llm_service.litellm") as mock_litellm,
         patch("app.services.prompt_service.settings") as mock_prompt_settings,
+        _patch_resolve_provider(),
     ):
         mock_dep_settings.agent_api_key = _VALID_TOKEN
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)

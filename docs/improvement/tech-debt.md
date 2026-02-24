@@ -59,26 +59,19 @@ Each entry tracks: origin story, severity, description, and suggested fix.
 - **Suggested fix**: 编写 backfill 脚本：对 `description IS NULL` 的 topic，用 `_format_plan_from_db` 反推 JSON 并写入 `description`。或要求用户对旧 topic 重新生成。
 - **Files**: `mentor-agent-service/app/tools/learning_plan_tool.py`
 
-### TD-007: Provisional/Commit SSE 协议（实时流式 + 防 double-response）
+### TD-007: Provisional/Commit SSE 协议（完美方案，未来增强）
 
 - **Origin**: Epic 2 Step 1 double-response bug 修复过程中，Codex 架构评审建议
-- **Severity**: Low（当前 Buffer + Discard 方案已解决核心问题）
-- **Description**: 当前 streaming agent loop 采用 Buffer + Discard 方案：每轮迭代缓冲 content chunks，`finish_reason=="stop"` 时 flush，`finish_reason=="tool_calls"` 时 discard。此方案正确性完备，但工具迭代期间用户看不到实时文本流（最终回答一次性输出）。Provisional/Commit 协议可实现"实时流式 + 正确性"兼得：
-  - LLM 输出的 content chunks 标记 `provisional: true`，实时流给前端
-  - `finish_reason=="stop"` → 发送 `commit` 事件，前端保留已展示内容
-  - `finish_reason=="tool_calls"` → 发送 `discard` 事件，前端清除已展示内容，执行工具后继续
-- **Impact**: 当前方案在多轮工具迭代场景下，用户需等待所有工具执行完毕才能看到回答文本。对于快速单轮工具调用（<2s）几乎无感知差异；对于 3+ 轮迭代可能有明显延迟感。
-- **Suggested fix**: 需 Open WebUI 前端配合：
-  1. SSE 事件格式扩展：新增 `provisional`、`commit`、`discard` 事件类型
-  2. 前端渲染层支持：provisional 内容可渲染但标记为"可撤回"，收到 discard 时清除
-  3. 后端 `agent_service.py` 改回实时 streaming，但包装为 provisional 事件
-- **Blocked by**: Open WebUI 前端改造（非本项目控制范围）
-- **Files**: `mentor-agent-service/app/services/agent_service.py:146-240`, `mentor-agent-service/app/utils/sse_generator.py`
+- **Severity**: Low（直接流式方案已解决用户痛点）
+- **Description**: 当前 streaming agent loop 已从 Buffer+Discard 演进为**直接流式输出**（2026-02-23 实施，详见 `docs/refactoring/direct-streaming.md`）。Content chunks 实时推送给客户端，工具调用时中间文字（如"让我查一下..."）对用户可见，`assistant_msg.pop("content", None)` 防止上下文污染。Provisional/Commit 协议是进一步的"完美方案"：可让前端在收到 `discard` 事件时清除中间文字，但需要 Open WebUI 前端配合。
+- **Impact**: 当前直接流式方案的唯一 trade-off 是工具调用场景下用户会看到一小段中间文字再看到工具执行状态。实际使用中可接受（类似 ChatGPT tool use 流程）。
+- **Suggested fix**: 需 Open WebUI 前端配合（非本项目控制范围），降级为未来增强。
+- **Files**: `mentor-agent-service/app/services/agent_service.py`, `mentor-agent-service/app/utils/sse_generator.py`
 
 ### TD-009: LLM 绕过工具编造结果 + RAG 降级不透明
 
 - **Origin**: Epic 2 Step 7 人工验证 → Epic 2 验收后多 KB 测试复现升级
-- **Severity**: **High**（LLM 可完全绕过工具链，输出无法验证的虚假内容）
+- **Severity**: **Low**（降级于 Epic 2 回顾 2026-02-23：系统提示词强化已有效控制，近期测试中未复现；通过 Epic 3 E2E 验收中的 tool-call 验证点持续监控）
 - **Description**: 发现两类 LLM 不诚实行为：
   1. **工具调用编造（Fabrication）**：多 KB 场景下，LLM 调用 `list_collections` 获取 KB 列表后，未调用 `generate_learning_plan`，而是在文本输出中伪造工具调用 UI（"🔧 Running generate_learning_plan..."）并编造完整学习计划。容器日志确认 `generate_learning_plan` 从未被调用（`finish_reason=stop`，零 tool_call），DB 无对应 topic 记录。
   2. **RAG 降级静默**：`search_knowledge_base` 返回错误字符串时，LLM 不告知用户 RAG 失败，静默用训练知识替代。
