@@ -1,0 +1,1153 @@
+{
+  "round": "A1",
+  "embedding": "all-MiniLM-L6-v2",
+  "phase": "Phase 1",
+  "chat_id": "c97e663e-4222-4027-a547-a1d35d9bc109",
+  "timestamp": "2026-02-24T11:40:39",
+  "status": "complete",
+  "summary": {
+    "total": 28,
+    "errors": 16,
+    "recall_at_5": "7/28",
+    "recall_at_5_pct": 25.0,
+    "top1_hit": "7/28",
+    "top1_hit_pct": 25.0,
+    "avg_latency_s": 50.14,
+    "p95_latency_s": 83.6,
+    "missed_questions": [
+      "Q01",
+      "Q03",
+      "Q04",
+      "Q05",
+      "Q10"
+    ]
+  },
+  "results": [
+    {
+      "id": "Q01",
+      "query": "《A Philosophy of Software Design》里 deep module 的核心含义是什么？",
+      "expected": "deep module",
+      "expected_book": "A Philosophy of Software Design",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 49.94,
+      "answer": "很好，知识库里确实有这本书！让我基于原文来回答你。\n\n---\n\n## Deep Module 的核心含义\n\nOusterhout 在第4章开篇就点明了动机：\n\n> *\"One of the most important techniques for managing software complexity is to design systems so that developers only need to face a small fraction of the overall complexity at any given time.\"*\n\n**Deep module 是实现这一目标的核心手段。**\n\n### 基本模型\n\nOusterhout 用一个视觉模型来定义\"深浅\"：\n\n```\n┌─────────────────────┐  ← 接口（越窄越好）\n│                     │\n│   封装的复杂性       │  ← 功能（越深越好）\n│   (隐藏的知识)      │\n│                     │\n└─────────────────────┘\n```\n\n- **Deep module** = 窄接口 + 大量隐藏的内部复杂性\n- **Shallow module** = 接口复杂度 ≈ 功能复杂度（几乎没有隐藏任何东西）\n\n### 关键设计建议\n\n原文特别强调一个常见陷阱：\n\n> *\"When decomposing a system into modules, try not to be influenced by the order in which operations will occur at runtime; that will lead you down the path of **temporal decomposition**, which will result in information leakage and shallow modules.\"*\n\n不要按照\"运行时的操作顺序\"来切分模块（比如：读文件→解析→处理→写回，就切成4个类）。  \n应该问：**这个任务需要哪些\"知识块\"？每个模块封装其中一块。**\n\n### 在全书设计原则中的位置\n\n这个概念是整本书的基石，原文总结的12条设计原则中，第4条直接点名：\n\n> *\"Modules should be deep\"*\n\n并且多条原则都是它的延伸，例如：\n- **原则6**：模块有简单接口比简单实现更重要\n- **原则7**：通用模块往往更深\n- **原则10**：把复杂性向下拉（Pull complexity downward）\n\n---\n\n## 一个检验问题\n\n> 你现在手头的代码中，有没有一个类/模块，它的方法数量和参数数量加起来，几乎和它实际做的事情一样多？——那很可能就是一个 shallow module。\n\n你想继续深入哪个方向？比如 **temporal decomposition 的具体陷阱**，或者 **如何判断接口是否\"足够窄\"**？",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "开发任务,我也经历了个人软件生涯中的第二次革命,而第一次,是从C语言转到面向对象。\n所以当我得知能有这样的机会,为这本荣获美国第14届Technical效能大奖的书撰写注释的\n时候,激动的几夜都没有睡好。我觉得是时候向国内的读者介绍这种思想了,既然TDD可以成\n为Eclipse这样大型项目的灵魂,就一定能为国内诸多软件项目带来福音。\n在本书的注释过程中,我没有拘泥于作者的原意,而是加入了大量TDD实践人员在工作\n中所有的实践经验和心得体会。正因为如此,注释并不是对原文的简单摘译,毕竟KentBeck\n所领悟的真理并不是国内每一个程序员都能领悟到的。而注释版的最大优势在于让读者看到大\n师的本意,避免每一个人在\"一千个林黛玉\"中迷失了方向。\n本书中有多种不同风格的注释内容,其中一些以小标题加以提示。本书的注释约定包括以下\n几类:\n中文目录及每一章的中心思想\n在原书目录之后给出了全书的中文目录,并提炼了每一章的中心思想,给出该章的整体线索,\n以便在读者阅读时有清晰的阅读思路。\n============================================================\nPage 8\n============================================================\n测试驱动开发(注释版)\n核心理念\n提炼出技术核心点和阅读关键点,对其进行详细说明和相关扩展,从而为读者在实际工作中\n遇到的问题提供更多的解决策略和更大的发挥空间。\n术语解读\n注释时从专业人员的角度对书中专业术语的出处、意义以及用法进行阐述和解释。\n触类旁通\n原书中的内容对读者的启迪,以及对当今技术发展的现实意义。\n最佳实践\n注释时基于我自己的行业实践经验总结的在测试驱动开发过程中需要注意的事项和规则。\n关键步骤\n对整个测试过程中比较关键的步骤进行的归纳总结。\n用友软件公司的陈立新是国内 TDD 的专家,本书获得了他的大量帮助。陈立新认为虽然经\n过了数十年技术和方法论的改良,软件的设计环节和编码环节之间仍然存在巨大的鸿沟。而TDD",
+            "2.全面正确地认识代码和利用代码,而传统的方式没有这个机会。\n3.为利用你的成果的人提供Sample,无论它是要利用你的源代码,还是直接重用你提供的\n组件。\n4.开发小组间降低了交流成本,提高了相互信赖的程度。\n5.避免了过度设计。\n6.系统可以与详尽的测试集一起发布,从而为程序的将来版本的修改和扩展提供了方便。\n7.TDD给了我们自信,让我们今天的问题在今天解决,明天的问题明天解决。今天不能解\n决明天的问题,因为明天的问题还没有出现(没有 TestCase),除非有TestCase,否则决不编写\n任何代码;明天也不必担心今天的问题,只要亮起了绿灯。'\n【不显而易见的优点]\n8.逃避了设计角色。对于-一个敏捷的开发小组,每个人都在做设计。\n9.大部分时间代码处在高质量状态,百分之百的时间里成果是可见的。\n10.由于可以保证编写测试和编写代码的是相同的程序员,因此降低了理解代码所花费的成本。\n11.为减少文档和代码之间存在的细微差别和由这种差别所引入的 Bug 做出杰出贡献。\n12.在预先设计和紧急设计之间建立一个平衡点,为区分哪些设计应该事先做、哪些设计应\n该迭代时做提供了一个可靠的判断依据。\n[有争议的优点]\n13.事实上提高了开发效率。每一个正在使用 TDD并相信TDD的人都会相信这一点,但观\n望者则不同,不相信TDD的人甚至坚决反对这一点。这很正常,世界总是这样。\n14.发现比传统测试方式更多的Bug\n15.使IDE的调试功能失去意义,或者应该说,避免了令人头痛的调试并节约了调试的时间。\n16.总是处在要么编程要么重构的状态下,不会使人抓狂(两顶帽子)。\n17.单元测试非常有趣。\n============================================================\nPage 246\n============================================================\n附注B\nxUnit实例的Java版本\n本附注中的代码段与第18章~第 23章中的内容对应。以下各段代码全部是正文中的代码基",
+            "7\n\"代码整洁有效\"(Cleancode thatworks),RonJeffrey的这句精辟的短语成为了测试驱动开\n发(TDD)的目标。基于以下的原因,Clean code thatworks是值得我们去实现的目标。\n它是一种可预测的开发方式。你可以知道什么时候能做完,而不用担心会有一长串的bug\n尾随着你。\n·它给你一个机会,让你可以学习所有代码能够教给你的方法。如果只是采用首先想到的\n方法,那么你将没有时间再考虑另一个更好的方法。\n它将给予你的软件使用者更美好的使用体验。\n它可以让团队内部之间互相信赖。\n把它写出来的感觉简直太棒了。\n远离有效的代码。不过不用过多考虑这些恐惧,我们应该做的是:使用一组自动测试一—测试驱\n动开发(TDD)的风格一—来推动我们的开发工作。在测试驱动开发中,应该:\n仅当测试失败的时候编写新代码;\n消除重复代码。\n这是两条简单的规则,但是它们会产生复杂个体和群体的行为规范,并具有以下技术含义:\n必须有机地进行设计,让运行着的代码在不同决策之间提供反馈;\n必须自己动手编写测试程序,因为我们不能每天浪费很多时间去等待别人编写测试程序;\n我们的开发环境必须对微小的变化提供快速的反应;\n为了简化测试,我们的设计必须由许多高内聚、低耦合的部分组成。\n这两条原则还暗示了编程任务的一种顺序。\n(1)红色一—编写一个短小的、不能运行的甚至一开始可能无法编译通过的测试程序。\n(2)绿色—尽快使测试得以通过,为此不惜做一些合理但是必要的事情。\n============================================================\nPage 10\n============================================================\n测试驱动开发(注释版)\n(3)重构一—一消除上一步中产生的所有重复代码。\n红色/绿色/重构一一这是TDD的口头禅。\n假设现在这种编程风格已经可行,那么它可能更进一步极大地减少代码的错误密度,并且使"
+          ],
+          "metadata": [
+            {
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "start_index": 0,
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "score": 0.6433206796646118
+            },
+            {
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "start_index": 0,
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "score": 0.5936501622200012
+            },
+            {
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "start_index": 0,
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "score": 0.5787930488586426
+            }
+          ],
+          "distances": [
+            0.6433206796646118,
+            0.5936501622200012,
+            0.5787930488586426
+          ]
+        }
+      ],
+      "source_names": [
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt"
+      ]
+    },
+    {
+      "id": "Q02",
+      "query": "《A Philosophy of Software Design》如何解释 complexity 的来源？",
+      "expected": "complexity",
+      "expected_book": "A Philosophy of Software Design",
+      "hit_at_1": 1,
+      "hit_at_5": 1,
+      "latency_s": 50.64,
+      "answer": "很好，我在知识库中找到了更完整的相关段落，可以给你一个更准确、更全面的回答。\n\n---\n\n## 《A Philosophy of Software Design》如何解释 Complexity 的来源？\n\n### 两大根本原因（Section 2.3）\n\n书中明确指出：\n\n> \"Complexity is caused by two things: **dependencies** and **obscurity**.\"\n\n---\n\n### 1. 依赖（Dependencies）\n\n当一段代码**无法被孤立地理解和修改**时，依赖便存在。依赖会导致：\n- **Change Amplification（变更放大）**：改一个地方，需要同步修改很多其他地方\n- **Cognitive Load（认知负担）**：开发者需要了解大量上下文才能完成一个任务\n\n**书中具体例子**：C 语言中，某函数分配内存并返回指针，却假设调用方负责释放内存——这就是一种隐式依赖，增加了认知负担，也埋下了内存泄漏的隐患。\n\n---\n\n### 2. 晦涩（Obscurity）\n\n当重要信息**不够显而易见**时，晦涩便产生。晦涩会导致：\n- **Unknown Unknowns（未知的未知）**：开发者甚至不知道自己遗漏了什么关键信息\n- 同时也加剧了认知负担\n\n书中还特别指出，晦涩不只是文档问题，更是**设计问题**：\n\n> \"If a system has a clean and obvious design, then it will need less documentation. The need for extensive documentation is often a red flag that the design isn't quite right.\"\n\n---\n\n### 3. 复杂性是**渐进积累**的（Section 2.4）\n\n这是书中一个重要观点，值得单独强调：\n\n> \"Complexity isn't caused by a single catastrophic error; it accumulates in lots of small chunks.\"\n\n复杂性不是某次重大失误造成的，而是无数个小的依赖和晦涩**逐渐叠加**的结果。这意味着每一个\"小小的妥协\"都有代价。\n\n---\n\n### 全局关系图\n\n```\nDependencies  ──→  Change Amplification\n              ──→  Cognitive Load\n                                        ┐\nObscurity     ──→  Unknown Unknowns     ├─→ Complexity\n              ──→  Cognitive Load      ┘\n```\n\n---\n\n### 🤔 思考问题\n\n书中说\"大量文档往往是设计不够好的红旗\"——你怎么看这个观点？你是否遇到过靠大量注释来\"补救\"设计缺陷的代码？这和**晦涩**的概念有什么关联？",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "obscurity. This section discusses these factors at a high level; subsequent\nchapters will discuss how they relate to lower-level design decisions.\nFor the purposes of this book, a dependency exists when a given piece\nof code cannot be understood and modified in isolation; the code relates in",
+            "7\n\"代码整洁有效\"(Cleancode thatworks),RonJeffrey的这句精辟的短语成为了测试驱动开\n发(TDD)的目标。基于以下的原因,Clean code thatworks是值得我们去实现的目标。\n它是一种可预测的开发方式。你可以知道什么时候能做完,而不用担心会有一长串的bug\n尾随着你。\n·它给你一个机会,让你可以学习所有代码能够教给你的方法。如果只是采用首先想到的\n方法,那么你将没有时间再考虑另一个更好的方法。\n它将给予你的软件使用者更美好的使用体验。\n它可以让团队内部之间互相信赖。\n把它写出来的感觉简直太棒了。\n远离有效的代码。不过不用过多考虑这些恐惧,我们应该做的是:使用一组自动测试一—测试驱\n动开发(TDD)的风格一—来推动我们的开发工作。在测试驱动开发中,应该:\n仅当测试失败的时候编写新代码;\n消除重复代码。\n这是两条简单的规则,但是它们会产生复杂个体和群体的行为规范,并具有以下技术含义:\n必须有机地进行设计,让运行着的代码在不同决策之间提供反馈;\n必须自己动手编写测试程序,因为我们不能每天浪费很多时间去等待别人编写测试程序;\n我们的开发环境必须对微小的变化提供快速的反应;\n为了简化测试,我们的设计必须由许多高内聚、低耦合的部分组成。\n这两条原则还暗示了编程任务的一种顺序。\n(1)红色一—编写一个短小的、不能运行的甚至一开始可能无法编译通过的测试程序。\n(2)绿色—尽快使测试得以通过,为此不惜做一些合理但是必要的事情。\n============================================================\nPage 10\n============================================================\n测试驱动开发(注释版)\n(3)重构一—一消除上一步中产生的所有重复代码。\n红色/绿色/重构一一这是TDD的口头禅。\n假设现在这种编程风格已经可行,那么它可能更进一步极大地减少代码的错误密度,并且使",
+            "Smell Bad? 代码是\n否存在坏味道?坏味\nFunctional\nTest\n道是 Martin Fowler\n在《重构-改善既\nClasses\n5\n1\n有代码的设计》一书\nFunctions (1)\n22\n15\n中提到的概念,比如\nLines (2)\n91\n89\n存在重复的代码,那\nCyclomatic complexity (3)\n1.04\n1\n将意味着一定存在不\n良设计。\n4.1 (4)\n5.9 (5)\nLines/function\n(1) Because we haven't implemented the whole APl, we can't evaluate the absolute\nnumber of functions, or the number of functions per class, or the number of\n5.代码统计与项目总\nlines per class. However, the ratios are instructive. There are roughly as many\n结如果出自一个大\nlines and functions in the test and functional code.\n而稳定的团队,或者\n(2)  The number of lines of test code can be reduced by extracting common fixtures.\n长期项目的一个环\nThe rough correspondence between lines of model code and lines of test code\nwill remain, however.\n节,那么这是很有必\n要的。\n(3)  Cyclomatic complexity is a measure of conventional flow complexity. Test com-"
+          ],
+          "metadata": [
+            {
+              "hash": "00f265160bddf3256c3e387db9587b68aaa19eeb193c98ea5fc15a27fc43738d",
+              "file_id": "497750d0-7f87-4137-bf6b-7521053db2de",
+              "creator": "",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "total_pages": 210,
+              "author": "John K. Ousterhout",
+              "creationdate": "2024-07-23T20:06:33+00:00",
+              "start_index": 0,
+              "moddate": "2024-07-23T20:06:37+00:00",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "title": "A Philosophy of Software Design, 2nd Edition",
+              "page_label": "23",
+              "page": 22,
+              "source": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "producer": "ConvertAPI",
+              "name": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "score": 0.6488233208656311
+            },
+            {
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "start_index": 0,
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "score": 0.5979011058807373
+            },
+            {
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "start_index": 0,
+              "score": 0.5183646082878113
+            }
+          ],
+          "distances": [
+            0.6488233208656311,
+            0.5979011058807373,
+            0.5183646082878113
+          ]
+        }
+      ],
+      "source_names": [
+        "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt"
+      ]
+    },
+    {
+      "id": "Q03",
+      "query": "《The Pragmatic Programmer》中的 DRY 原则在实务上怎么落地？",
+      "expected": "DRY",
+      "expected_book": "Pragmatic Programmer",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 50.21,
+      "answer": "我在知识库中检索到的内容来自 **software-engineering** 集合，但这些片段实际上来自 **《Test-Driven Development by Example》（Kent Beck）**，而非《The Pragmatic Programmer》[1]。不过，DRY 原则（Don't Repeat Yourself）是两本书共同强调的核心理念，我可以结合检索到的内容和我自身的知识来回答你。\n\n---\n\n## DRY 原则的实务落地\n\n### 📌 检索内容给出的直接示范\n\n知识库中的片段恰好展示了 DRY 的**典型反模式和修复流程** [1]：\n\n> \"We sinned mightily in copying and pasting tons of code in order to do it quickly. Now it is time to clean up.\"\n\n这描述了 TDD 的节奏：**先让代码跑起来（Make it run），再消除重复（Remove duplication）**[1]。\n\n这与 DRY 的落地节奏完全吻合 —— **不是一开始就追求完美抽象，而是在重复出现时再重构**。\n\n---\n\n### 🛠️ DRY 的实务落地步骤\n\n| 阶段 | 实践 |\n|------|------|\n| **识别重复** | 代码重复、逻辑重复、注释与代码不一致 |\n| **提取抽象** | Extract Method / Extract Class / Extract Superclass [1] |\n| **单一来源** | 配置、常量、业务规则只在一个地方定义 |\n| **测试保驾** | 重构前先有测试，确保行为不变 |\n\n### 🔑 常见落地场景\n\n1. **代码层面**：重复的逻辑 → 抽取函数/类\n2. **数据层面**：魔法数字/字符串 → 命名常量\n3. **文档层面**：避免注释重复说代码已经表达的内容\n4. **构建层面**：构建脚本、部署配置不要在多处维护\n\n### ⚠️ 常见误区\n\n- **过早抽象**比重复更危险 —— 两处相似不一定是真重复，等第三次出现再抽象（Rule of Three）\n- Copy-paste 在**探索阶段是允许的**，但必须在 Make it run 之后及时 Remove duplication [1]\n\n---\n\n> 💡 **思考题**：你目前的项目中，最常见的重复是哪种类型 —— 是代码逻辑重复、配置重复，还是文档与代码的不一致？定位到具体类型，才能选择最合适的消除手段。\n\n如果你希望我搜索知识库中关于 Pragmatic Programmer 的具体章节内容，告诉我你上传了哪本书的文档，我可以做更精准的检索。",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "THE MONEY EXAMPLE\nStop. Hold on. I can hear the aesthetically inclined among you sneering and\n最佳实践\nspitting. Copy-and-paste reuse? The death of abstraction? The killer of clean\ndesign?\n要善于使用Ctrl-C/\nIf you're upset, take a cleansing breath. In through the nose . . . hold it 1, 2,\nCtrl-V 来编写代码。\n3\n. out through the mouth. There. Remember, our cycle has different phases\n(they go by quickly, often in seconds, but they are phases.):\n1.\nWrite a test.\n这个最佳实践有三层\n含义,这里仅揭示第\nMake it compile.\n2.\n一层。由于 TDD方法\n本身给出了明确的重\n3.\nRun it to see that it fails.\n构的时机(虽然在别\n4.\nMake it run.\n的方法学中也可以重\n构,但是那时的重构\n5.\nRemove duplication.\n没有固定的机会,所\nThe different phases have different purposes. They call for different styles of solu-\n以常常被人们在随机\n的时间启动),所以不\ntion, different aesthetic viewpoints. The first three phases need to go by quickly,\n用担心在代码中使用\nso we get to a known state with the new functionality. We can commit any num-",
+            "S CHF * 2 =10 CHF\n我们避免了陷入这个\nDollar/Franc duplication\n怪圈。是的,我总是\nCommon equals\n先有可以Work的代\nCommon times\n码,再将它们变为\nClean 的。\nThere is a fabulous sequence in Crossing to Safety in which author Wallace\nStegner describes a character's workshop.Every item is perfectly in place,the\nfloor is spotless,all is order and cleanliness.The character, however,has never\n要么让其中的一个类\nmade anything. \"Preparing has been his life's work. He prepares, then he cleans\n继承另一个类,要么\nup.\"(This is also the book whose ending sent me audibly blubbering in busi-\nExtract Superclass。\nness class on a trans-Atlantic 747.Read with caution.)\n前者在这个例子中不\nWe avoided this trap in Chapter 5.We actuallygot a new testcase working\n能节约任何代码,而\nBut we sinned mightily in copying and pasting tons of code in order to do it\n且会得到\"一个美元\n是一个法郎\"或\nquickly.Now it is time to clean up.\n个法郎是一个美元\"",
+            "的支持,这是大量\n的.NET开发人员第\nThe simple answer, supplied by Phlip is, \"Write tests until fear is transformed\n-次接触重构工具。\ninto boredom.\" This is a feedback loop, however, and it requires that you find\nthe answer yourself. Because you came to this book for answers, not questions\n(in which case you're already reading the wrong section, but enough of the self-\n有时,我们会用测试\nreferential literary recursion stuff), try this list. You should test:\n来标注外部 API 的\n某种不寻常的行为\n· Conditionals\n(未被该API的文档\n声明),于是我对这\n· Loops\n种API 添加了—个\n· Operations\n监视行为,一旦它改\n变了这种不寻常的\n● Polymorphism\n行为(由于未被声\n明,它很可能会在后\nBut only those that you write. Unless you have reason to distrust it, don't test\n面的版本中发生变\ncode from others. Sometimes, the precise specification of (by which I mean\n化),测试就不能通\n\"bugs in\") external code requires you to write more logic of your own. See\n过,这样我就会在第"
+          ],
+          "metadata": [
+            {
+              "start_index": 0,
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "score": 0.6170492768287659
+            },
+            {
+              "start_index": 0,
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "score": 0.6143650412559509
+            },
+            {
+              "start_index": 0,
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "score": 0.5888122916221619
+            }
+          ],
+          "distances": [
+            0.6170492768287659,
+            0.6143650412559509,
+            0.5888122916221619
+          ]
+        }
+      ],
+      "source_names": [
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt"
+      ]
+    },
+    {
+      "id": "Q04",
+      "query": "《The Pragmatic Programmer》里的 tracer bullet 和 prototype 有什么区别？",
+      "expected": "tracer bullet",
+      "expected_book": "Pragmatic Programmer",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 52.92,
+      "answer": "很好，我在你的知识库中找到了《The Pragmatic Programmer》的相关内容，现在可以直接引用原文来回答你！\n\n---\n\n## Tracer Bullet vs. Prototype — 原书解析\n\n书中特别强调这两者的区别值得反复强调：\n\n> *\"Prototyping generates disposable code. Tracer code is lean but complete, and forms part of the skeleton of the final system.\"*\n\n### 核心区别对比\n\n| 维度 | Tracer Bullet（曳光弹） | Prototype（原型） |\n|---|---|---|\n| **代码命运** | **保留**，成为最终系统的骨架 | **丢弃**，一次性代码 |\n| **覆盖范围** | 端到端穿透所有层，功能精简但完整 | 聚焦探索某一个**具体**方面 |\n| **目的** | 在真实条件下获取即时反馈，射中移动的目标 | 侦察情报，降低特定未知风险 |\n| **使用时机** | 需求模糊、技术未知、环境会变化时 | 在发射曳光弹**之前**做准备 |\n\n### 两者的关系\n\n原书用了一个绝妙的比喻来定义它们的先后关系：\n\n> *\"Think of prototyping as the reconnaissance and intelligence gathering that takes place **before** a single tracer bullet is fired.\"*\n\n也就是说：**先用 Prototype 侦察，再用 Tracer Bullet 打通全链路** —— 它们不是竞争关系，而是先后配合的关系。\n\n---\n\n### 联系你之前学的 TDD\n\n这和 TDD 的\"红-绿-重构\"有相似的精神内核：\n- 都反对\"一次性大计算然后开枪\"（即 Big Design Up Front）\n- 都强调**小步前进 + 真实反馈**\n- Tracer Bullet 打通骨架后，TDD 可以帮你在这个骨架上安全地填充血肉\n\n---\n\n思考一下：**如果你要做一个从未做过的新项目，你会先做 Prototype 探索哪个风险点，然后再用 Tracer Bullet 打通哪条主链路？** 试着用这个框架分析一个你熟悉的场景 🎯",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "7\n\"代码整洁有效\"(Cleancode thatworks),RonJeffrey的这句精辟的短语成为了测试驱动开\n发(TDD)的目标。基于以下的原因,Clean code thatworks是值得我们去实现的目标。\n它是一种可预测的开发方式。你可以知道什么时候能做完,而不用担心会有一长串的bug\n尾随着你。\n·它给你一个机会,让你可以学习所有代码能够教给你的方法。如果只是采用首先想到的\n方法,那么你将没有时间再考虑另一个更好的方法。\n它将给予你的软件使用者更美好的使用体验。\n它可以让团队内部之间互相信赖。\n把它写出来的感觉简直太棒了。\n远离有效的代码。不过不用过多考虑这些恐惧,我们应该做的是:使用一组自动测试一—测试驱\n动开发(TDD)的风格一—来推动我们的开发工作。在测试驱动开发中,应该:\n仅当测试失败的时候编写新代码;\n消除重复代码。\n这是两条简单的规则,但是它们会产生复杂个体和群体的行为规范,并具有以下技术含义:\n必须有机地进行设计,让运行着的代码在不同决策之间提供反馈;\n必须自己动手编写测试程序,因为我们不能每天浪费很多时间去等待别人编写测试程序;\n我们的开发环境必须对微小的变化提供快速的反应;\n为了简化测试,我们的设计必须由许多高内聚、低耦合的部分组成。\n这两条原则还暗示了编程任务的一种顺序。\n(1)红色一—编写一个短小的、不能运行的甚至一开始可能无法编译通过的测试程序。\n(2)绿色—尽快使测试得以通过,为此不惜做一些合理但是必要的事情。\n============================================================\nPage 10\n============================================================\n测试驱动开发(注释版)\n(3)重构一—一消除上一步中产生的所有重复代码。\n红色/绿色/重构一一这是TDD的口头禅。\n假设现在这种编程风格已经可行,那么它可能更进一步极大地减少代码的错误密度,并且使",
+            "开发任务,我也经历了个人软件生涯中的第二次革命,而第一次,是从C语言转到面向对象。\n所以当我得知能有这样的机会,为这本荣获美国第14届Technical效能大奖的书撰写注释的\n时候,激动的几夜都没有睡好。我觉得是时候向国内的读者介绍这种思想了,既然TDD可以成\n为Eclipse这样大型项目的灵魂,就一定能为国内诸多软件项目带来福音。\n在本书的注释过程中,我没有拘泥于作者的原意,而是加入了大量TDD实践人员在工作\n中所有的实践经验和心得体会。正因为如此,注释并不是对原文的简单摘译,毕竟KentBeck\n所领悟的真理并不是国内每一个程序员都能领悟到的。而注释版的最大优势在于让读者看到大\n师的本意,避免每一个人在\"一千个林黛玉\"中迷失了方向。\n本书中有多种不同风格的注释内容,其中一些以小标题加以提示。本书的注释约定包括以下\n几类:\n中文目录及每一章的中心思想\n在原书目录之后给出了全书的中文目录,并提炼了每一章的中心思想,给出该章的整体线索,\n以便在读者阅读时有清晰的阅读思路。\n============================================================\nPage 8\n============================================================\n测试驱动开发(注释版)\n核心理念\n提炼出技术核心点和阅读关键点,对其进行详细说明和相关扩展,从而为读者在实际工作中\n遇到的问题提供更多的解决策略和更大的发挥空间。\n术语解读\n注释时从专业人员的角度对书中专业术语的出处、意义以及用法进行阐述和解释。\n触类旁通\n原书中的内容对读者的启迪,以及对当今技术发展的现实意义。\n最佳实践\n注释时基于我自己的行业实践经验总结的在测试驱动开发过程中需要注意的事项和规则。\n关键步骤\n对整个测试过程中比较关键的步骤进行的归纳总结。\n用友软件公司的陈立新是国内 TDD 的专家,本书获得了他的大量帮助。陈立新认为虽然经\n过了数十年技术和方法论的改良,软件的设计环节和编码环节之间仍然存在巨大的鸿沟。而TDD",
+            "触类旁通\n原书中的内容对读者的启迪,以及对当今技术发展的现实意义。\n最佳实践\n注释时基于我自己的行业实践经验总结的在测试驱动开发过程中需要注意的事项和规则。\n关键步骤\n对整个测试过程中比较关键的步骤进行的归纳总结。\n用友软件公司的陈立新是国内 TDD 的专家,本书获得了他的大量帮助。陈立新认为虽然经\n过了数十年技术和方法论的改良,软件的设计环节和编码环节之间仍然存在巨大的鸿沟。而TDD\n致力于填补这个鸿沟,将设计和编码无缝地连接起来,由 TDD 建立的整个开发链条,上承自然\n语言描述的UseCase,下启重构而来的\"最合适\"软件架构,正是软件开发人员—掌握着技术\n的人一一所最需要的。\n感谢陈立新和丁旭对注释工作的帮助,感谢杜银翠,是她提醒我应该将文中的Python 代码\n改成Java 语言描述,为国内的读者提供更多的方便。感谢国内致力于研究和推广TDD 的同仁们,\n我们在网上收到了很多来自他们的意见和启发。感谢Kent Beck、Martin Fowler、Eric Gamma 和\n其他 TDD 的先行者,为我们创造了如此的财富。感谢Eclipse,如果没有这样的成功的案例,TDD\n也不会有今天!\n孙方\nSVN咨询师\n用友软件股份有限公司U8平台项目经理\n国内最早一批推广测试驱动开发理念的专家\n11\n============================================================\nPage 9\n============================================================\n7\n\"代码整洁有效\"(Cleancode thatworks),RonJeffrey的这句精辟的短语成为了测试驱动开\n发(TDD)的目标。基于以下的原因,Clean code thatworks是值得我们去实现的目标。\n它是一种可预测的开发方式。你可以知道什么时候能做完,而不用担心会有一长串的bug\n尾随着你。\n·它给你一个机会,让你可以学习所有代码能够教给你的方法。如果只是采用首先想到的"
+          ],
+          "metadata": [
+            {
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "start_index": 0,
+              "score": 0.592982292175293
+            },
+            {
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "start_index": 0,
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "score": 0.5851250886917114
+            },
+            {
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "start_index": 0,
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "score": 0.5630176663398743
+            }
+          ],
+          "distances": [
+            0.592982292175293,
+            0.5851250886917114,
+            0.5630176663398743
+          ]
+        }
+      ],
+      "source_names": [
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt"
+      ]
+    },
+    {
+      "id": "Q05",
+      "query": "《Tidy First》里 \"先整理再改功能\" 的核心理由是什么？",
+      "expected": "structure change",
+      "expected_book": "Tidy First",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 83.6,
+      "answer": "很棒的追问！这正是《Tidy First?》最有深度的部分——第27章给出了**经济学框架**来判断\"到底该不该先整理\"。\n\n---\n\n## \"先整理\"的经济学判断框架（第27章）\n\n### 核心公式\n\nKent Beck 给出了一个明确的判断条件 [1]：\n\n```\ncost(tidying) + cost(behavior change after tidying)\n    < cost(behavior change without tidying)\n```\n\n**如果整理后再改功能的总成本，低于直接改功能的成本 → 果断先整理。**\n\n---\n\n### 两种经济力量的拉锯 [1]\n\n| 视角 | 逻辑 | 对\"先整理\"的建议 |\n|------|------|----------------|\n| **折现现金流** | 钱要早赚、晚花；先整理是\"先花钱后赚钱\" | ❌ 不建议先整理 |\n| **期权思维** | 现在花小钱，买到未来更多选择的灵活性 | ✅ 建议先整理（当整理能创造期权时）|\n\n所以 Kent Beck 的答案是：**\"Tidy first? Yes. And also no.\"** — 这不是一个教条，而是一个需要判断的经济问题。\n\n---\n\n### 即使公式不满足，先整理也可能值得 [1]\n\n当 `cost(tidying) + cost(after) > cost(without tidying)` 时，仍有两种情形值得先整理：\n\n1. **分摊效应**：你接下来要做一系列功能改动，这些改动都受益于同一次整理 → 把整理成本分摊到多次改动上，整体划算。\n2. **期权价值**：整理创造的灵活性（未来的可能性）足够大，超过了\"提前花钱\"的损失。\n\n> *\"We are firmly in the land of judgment here.\"* — Beck 坦承，这里没有算法，只有判断力（sniffer）。\n\n---\n\n### 整理与功能改动要分开提交 [1]\n\n> *\"Sequences of tidyings go in one PR. Behavior changes go in a separate PR.\"*\n\n这是操作层面的关键原则：**结构变更和行为变更永远放在不同的 PR/commit**，原因是：\n- 便于代码审查者区分\"什么改变了行为\"\n- 出 bug 时更容易隔离定位\n- 整理出错也能单独回滚\n\n---\n\n### 一句话总结\n\n> **先整理，当且仅当：整理的成本 + 整理后改功能的成本 < 直接改功能的成本；或者整理创造的期权价值足够大。**\n\n---\n\n现在有个问题想请你思考：**你最近遇到的代码改动中，有没有一次你\"直接改了功能但事后感觉应该先整理\"的经历？** 对照这个公式，你觉得当时先整理是否值得？",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "中文目录\n第1部分\n货币实例\n第1章\n多币种资金\n工欲善其事, 必先利其器。 初次见到 TDD, 还是先试试Unit称心不称心吧。\n另外, 从开始时就建立 \"TODO List\" 的习惯很重要。\n第2章\n变质的对象\n11\nInterface 不是拍脑门得来的, 而是因为测试用例编译不能通过。尽快让测试用\n例运行是压倒一切的中心任务。\n第3章\n一切均等\n15\n学会试用重构改进设计, 重构和 TDD 是不可分离的左右手。\n第4章\n私有性\n本章使用刚刚开发的一个功能来改进测试用例。\n第5章\n法郎在诉说\n23\n大的目标还不清脚的时候,可以先写一些小的测试用例,或者把大的测试拆成\n小的。\n第6章\n也谈一切均等\n27\n消除冗余代码, 有时很需要技巧。\n第7章\n苹果和橘子\n33\n除非有很好的动机, 否则不要引入更多的设计。\n============================================================\nPage 21\n============================================================\n测试驱动开发(注释版)\n第8章\n制造对象\n35\n再次消除见余代码,这常常是重构的主要目的。\n第9章\n我们所处的时代\n39\n软件设计不要天马行空,要脚踏实地。\n第10章\n有趣的乘法\n45\nJava 程序员有时用 toString()方法直接调试,不用担心,大师也这么做。\n第11章万恶之源\n51\n删除一些测试, 因为它们已经允余了或不适应新的设计。\n第12 章加法,最后的部分\n55\n在设计中应用比喻,在比喻中书写测试,在测试的推动下产生代码,用代码回\n应设计。\n第13章\n完成\n..61\n步调已经开始加快,编写测试用例,迫使开发往前走,而不要往后退。\n第14章\n变化\n67\nTDD 不分测试和\"实验\",本章写了一个测试程序来核实有关 lava 语言的推断。\n同时引入了一个帮助类,没有对其进行专门测试。\n第15章混合货币\n.73\n重构产生了蝴蝶效应,引发了我们对设计的一系列修改,好在有测试,胆子比\n以前大多了。",
+            "return Money.dollar(10) ;\n============================================================\nPage 82\n============================================================\nADDIIION, FINALLY\nWe're back to a green bar, and ready to refactor. First, to review, we\n在第57页留下的问题\n其实就是作者一直提\n· Reduced a big test to a smaller test that represented progress ($5 + 10 CHF\n到的\"步伐大小\"问\nto $5 + $5)\n题。如果已经敏锐地\n· Thought carefully about the possible metaphors for our computation\n感觉到在后面还会有\n\"银行\"以其他身份介\n· Rewrote our previous test based on our new metaphor\n入模型,那么就可以\n直接用Bank,如果还\n· Got the test to compile quickly\n没有想好这个问题,\n· Made it run\n那么可以首先引人\nExchangeRateProvider\n· Looked forward with a bit of trepidation to the refactoring necessary to\n的概念,如果以后还\nmake the implementation real\n有用到 Bank 的地方,\n就让 Bank 类实现\nExchangeRateProvider\n接口。\n============================================================\nPage 83",
+            "开发任务,我也经历了个人软件生涯中的第二次革命,而第一次,是从C语言转到面向对象。\n所以当我得知能有这样的机会,为这本荣获美国第14届Technical效能大奖的书撰写注释的\n时候,激动的几夜都没有睡好。我觉得是时候向国内的读者介绍这种思想了,既然TDD可以成\n为Eclipse这样大型项目的灵魂,就一定能为国内诸多软件项目带来福音。\n在本书的注释过程中,我没有拘泥于作者的原意,而是加入了大量TDD实践人员在工作\n中所有的实践经验和心得体会。正因为如此,注释并不是对原文的简单摘译,毕竟KentBeck\n所领悟的真理并不是国内每一个程序员都能领悟到的。而注释版的最大优势在于让读者看到大\n师的本意,避免每一个人在\"一千个林黛玉\"中迷失了方向。\n本书中有多种不同风格的注释内容,其中一些以小标题加以提示。本书的注释约定包括以下\n几类:\n中文目录及每一章的中心思想\n在原书目录之后给出了全书的中文目录,并提炼了每一章的中心思想,给出该章的整体线索,\n以便在读者阅读时有清晰的阅读思路。\n============================================================\nPage 8\n============================================================\n测试驱动开发(注释版)\n核心理念\n提炼出技术核心点和阅读关键点,对其进行详细说明和相关扩展,从而为读者在实际工作中\n遇到的问题提供更多的解决策略和更大的发挥空间。\n术语解读\n注释时从专业人员的角度对书中专业术语的出处、意义以及用法进行阐述和解释。\n触类旁通\n原书中的内容对读者的启迪,以及对当今技术发展的现实意义。\n最佳实践\n注释时基于我自己的行业实践经验总结的在测试驱动开发过程中需要注意的事项和规则。\n关键步骤\n对整个测试过程中比较关键的步骤进行的归纳总结。\n用友软件公司的陈立新是国内 TDD 的专家,本书获得了他的大量帮助。陈立新认为虽然经\n过了数十年技术和方法论的改良,软件的设计环节和编码环节之间仍然存在巨大的鸿沟。而TDD"
+          ],
+          "metadata": [
+            {
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "start_index": 0,
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "score": 0.5865544676780701
+            },
+            {
+              "start_index": 0,
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "score": 0.5823114514350891
+            },
+            {
+              "start_index": 0,
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "score": 0.5808151960372925
+            }
+          ],
+          "distances": [
+            0.5865544676780701,
+            0.5823114514350891,
+            0.5808151960372925
+          ]
+        }
+      ],
+      "source_names": [
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt"
+      ]
+    },
+    {
+      "id": "Q06",
+      "query": "《TDD by Example》中的 red-green-refactor 三步法具体怎么执行？",
+      "expected": "red-green-refactor",
+      "expected_book": "TDD",
+      "hit_at_1": 1,
+      "hit_at_5": 1,
+      "latency_s": 58.74,
+      "answer": "很好的延伸问题！你的知识库里恰好有一个有趣的**反对声音**，值得一起思考。\n\n---\n\n## 关于步骤大小：小步 vs 大步？\n\n书中 Kent Beck 自己坦白了一个\"秘密\" [1]：\n\n> *\"I look at the size of the steps in the development I've just shown you, and it looks ridiculous.\"*\n\n他承认那些步骤小得\"可笑\"——但他用更大的步骤尝试了同样的任务，**花了6小时、从头重来了两次**，结果还是以为代码好了其实没有。\n\n**结论是** [1]：\n- 掌握 TDD 之后，你可以用更大的功能跨度\n- **但要能在需要时退回到极小步骤** — 这是基本功\n\n---\n\n## 一个值得你思考的批评视角\n\n《A Philosophy of Software Design》的作者 John Ousterhout 对 TDD 有直接的批评 [1]：\n\n> *\"The problem with test-driven development is that it focuses attention on getting specific features working, rather than finding the best design. This is tactical programming pure and simple.\"*\n\n他的担忧是：\n- 每次只为让下一个测试通过而写代码 → 容易**堆砌 hack**\n- **没有明显的时机做整体设计**，最终可能变成一团乱麻\n- 他认为开发单元应该是**抽象（abstraction）**，而不是**功能（feature）**\n\n不过他也承认，**修 bug 时先写测试**是完全合理的做法。\n\n---\n\n## 两者的张力\n\n| 观点 | 来源 | 核心主张 |\n|------|------|---------|\n| TDD 三步法 | Kent Beck | 小步快跑，测试驱动设计演进 |\n| 批评 TDD | Ousterhout | 先想清楚抽象，再写代码 |\n\n这两种观点并不完全对立 — Beck 的 Refactor 步骤正是在弥补\"先让测试通过\"带来的设计欠债。\n\n---\n\n### 🤔 留一个问题给你思考\n\nOusterhout 说 TDD 让人\"没有时机做设计\"，但 Beck 的流程里有 Refactor 阶段。你觉得 **Refactor 阶段能替代前期的整体设计思考吗**？什么情况下它够用，什么情况下不够？",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "间隔非常短,那么意\n味着你可能正在做重\n构;如果时间间隔非\n常长,那么意味着你\n在设计和构思如何用\nProcess\nTestCase 表达 TODO\nList.-中的一条任务。\n而真正编写代码时的\nThe TDD cycle is as follows.\n时间间隔往往位于二\n者之间。\n· Add a little test.\n· Run all tests and fail.\n============================================================\nPage 108\n============================================================\nPROCESS\n· Make a change.\n· Run the tests and succeed.\n· Refactor to remove duplication.\nAssuming that writing a test is a single step, how many changes does it take\nto compile, run, and refactor? (By change, I mean changing a method or class\ndefinition.) Figure 17.2 shows a histogram of the number of changes for each of\nthe money tests you have just seen.\nI expect that if we gathered data for a large project, the number of changes\nto compile and run would remain fairly small (they could be even smaller if the",
+            "2. Run all tests and see the new one fail.\n2.运行所有的测\n试,发现最新的测\n3. Make a little change.\n试不能通过(制品:\n4. Run all tests and see them all succeed.\n计划清单、红色的\n结果栏);\n5. Refactor to remove duplication.\n3.做尽可能少的改\n动,让测试通过(制\nThe surprises are likely to include\n品:产品代码);\n4.运行所有的测试,\n· How each test can cover a small increment of functionality\n而且全部通过(制\n品:成就感、绿色的\n· How small and ugly the changes can be to make the new tests run\n结果栏);\n5.重构代码,以消除\n· How often the tests are run\n重复设计,优化设计\nS    ss    s\n结构(制品:Clear\nCode That Works)。\n从现在开始的每一\n章都是一个小规模\n的迭代,每次迭代都\n很简单,很快捷,用\n作者的话说,就是\n\"以秒计算\"的,每\n次迭代满足上面这\n个流程,不过有时可\n能省略了某些环节。\n============================================================\nPage 25\n============================================================\n============================================================\nPage 26\n============================================================\nChapter 1\n从第1章开始,作者",
+            "人还是愿意停留在\ne         o\n程序员级别的 TDD\ntests written first.\n上,因为想让客户/\nTDD as described in this book is a technique that is entirely under your con-\n用户为你编写测试\n代码实在是一件头\ndn xi 'sooyo os noe f aepon n uisn nis pue dn n yid uo noy on\n疼的事情(多数人不\nrhythm of red/green/refactor, the technical issues of application fixturing, and\n承认这种责任转\nthe organizational change issues surrounding user-written tests is unlikely to be\n移)。但是软件行业\nsuccessful. The One Step Test rule applies. Get red/green/refactor going in your\n的发展趋势就在于\nown practice, then spread the message.\n此,专业的以行业为\nAnother aspect of ATDD is the length of the cycle between test and feedback.\n划分的领域模型咨\nIf a customer wrote a test and ten days later it fnally worked, you would be\n询师可能会担负起\nstaring at a red bar most of the time. I think I would still want to do program-\n这种责任,以 ATDD\nmer-level TDD, so that\n为工具取代程序员\n直接与客户沟通的\n· I got immediate green bars\n环节。"
+          ],
+          "metadata": [
+            {
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "start_index": 0,
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "score": 0.7238057851791382
+            },
+            {
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "start_index": 0,
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "score": 0.6896867156028748
+            },
+            {
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "start_index": 0,
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "score": 0.6608257293701172
+            }
+          ],
+          "distances": [
+            0.7238057851791382,
+            0.6896867156028748,
+            0.6608257293701172
+          ]
+        }
+      ],
+      "source_names": [
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt"
+      ]
+    },
+    {
+      "id": "Q07",
+      "query": "《Pro Git》里 working tree、staging area、repository 三者关系是什么？",
+      "expected": "staging area",
+      "expected_book": "Pro Git",
+      "hit_at_1": 1,
+      "hit_at_5": 1,
+      "latency_s": 54.07,
+      "answer": "## Working Tree、Staging Area、Repository 三者关系\n\n《Pro Git》在第 1 章用 **\"三个状态\"** 来统领这一核心概念，理解它是掌握 Git 的关键。\n\n---\n\n### 三个区域的定义\n\n| 区域 | 别名 | 作用 |\n|------|------|------|\n| **Working Directory**（工作目录） | Working Tree / Sandbox | 从 Git 数据库解压出的实际文件，放在磁盘上供你自由编辑和试验 |\n| **Staging Area**（暂存区） | Index | 记录\"下次提交将包含哪些内容\"的文件，位于 `.git` 目录中 |\n| **Git Directory**（Git 目录/仓库） | Repository | 存储项目元数据和对象数据库的核心，即 `.git` 文件夹本身 |\n\n[1]\n\n---\n\n### 三个对应的文件状态\n\n文件在三个区域之间流转时，对应不同的状态 [1]：\n\n- **Modified（已修改）**：文件在工作目录中被改动，但还未放入暂存区\n- **Staged（已暂存）**：已修改的文件被标记，其快照将进入下次提交\n- **Committed（已提交）**：数据已安全存入本地 Git 数据库\n\n---\n\n### 基本工作流（数据流向）\n\n```\nWorking Directory  ──git add──▶  Staging Area  ──git commit──▶  Git Directory\n   （修改文件）                    （准备快照）                    （永久存档）\n```\n\n书中原文描述的步骤 [1]：\n1. 在 **Working Directory** 中修改文件\n2. `git add`：将文件快照添加到 **Staging Area**\n3. `git commit`：将 Staging Area 中的快照永久存入 **Git Directory**\n\n---\n\n### 一个直觉类比\n\n书中把 Working Directory 比作一个 **\"沙盒（sandbox）\"** [1]——你可以在里面自由试验改动，确认无误后再依次推进到暂存区和历史记录中。\n\n延伸来说，可以把整个流程想象成**写文章投稿**：\n- **Working Directory** = 草稿纸（随时涂改）\n- **Staging Area** = 整理好准备打印的定稿（选择要提交的内容）\n- **Git Directory** = 发布存档的期刊库（永久留存，可回溯）\n\n---\n\n这个三区域模型中，你觉得哪里最容易困惑——是**暂存区存在的意义**（为什么不直接 commit？），还是**不同状态之间如何来回切换**？",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "staging area.\nFigure 1-6. Working directory, staging area, and Git directory\nThe Git directory is where Git stores the metadata and object database for your project. This is the most\nimportant part of Git, and it is what is copied when you clone a repository from another computer.\nThe working directory is a single checkout of one version of the project. These files are pulled out of the\ncompressed database in the Git directory and placed on disk for you to use or modify.\nThe staging area is a file, generally contained in your Git directory, that stores information about what will go into\nyour next commit. It's sometimes referred to as the \"index\" , but it's also common to refer to it as the staging area.\nThe basic Git workflow goes something like this:\n1. You modify files in your working directory.\n2. You stage the files, adding snapshots of them to your staging area.",
+            "Chapter 1 ■ GettinG Started\n8\nThe Three States\nNow, pay attention. This is the main thing to remember about Git if you want the rest of your learning process to go\nsmoothly. Git has three main states that your files can reside in: committed, modified, and staged. Committed means\nthat the data is safely stored in your local database. Modified means that you have changed the file but have not\ncommitted it to your database yet. Staged means that you have marked a modified file in its current version to go into\nyour next commit snapshot.\nThis leads us to the three main sections of a Git project: the Git directory, the working directory, and the\nstaging area.\nFigure 1-6. Working directory, staging area, and Git directory\nThe Git directory is where Git stores the metadata and object database for your project. This is the most",
+            "Chapter 10 ■ Git internals\n361\nYou'll now create a new tree with the second version of test.txt and a new file as well:\n$ echo 'new file' > new.txt\n$ git update-index test.txt\n$ git update-index --add new.txt\nYour staging area now has the new version of test.txt as well as the new file new.txt. Write out that tree\n(recording the state of the staging area or index to a tree object) and see what it looks like:\n$ git write-tree\n0155eb4229851634a0f03eb265b69f5a2d56f341\n$ git cat-file -p 0155eb4229851634a0f03eb265b69f5a2d56f341\n100644 blob fa49b077972391ad58037050f2a75f74e3671e92      new.txt\n100644 blob 1f7a7a472abf3dd9643fd615f6da379c4acb3e3a      test.txt\nNotice that this tree has both file entries and also that the test.txt SHA is the \"version 2\" SHA from earlier\n(1f7a7a). Just for fun, you'll add the first tree as a subdirectory into this one. You can read trees into your staging"
+          ],
+          "metadata": [
+            {
+              "hash": "8996bb27080ff33d990e29b7683fa46cf2ac3019925d726cc053d623a9bc6c39",
+              "name": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "moddate": "2014-11-18T07:27:18+05:30",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "producer": "PyPDF",
+              "total_pages": 441,
+              "page": 10,
+              "file_id": "efac2fe6-7e50-4c83-99d0-a7f209b5a87e",
+              "creationdate": "2014-11-22T23:34:56+01:00",
+              "source": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "start_index": 0,
+              "page_label": "8",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "creator": "PyPDF",
+              "score": 0.6727864146232605
+            },
+            {
+              "page": 10,
+              "file_id": "efac2fe6-7e50-4c83-99d0-a7f209b5a87e",
+              "creator": "PyPDF",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "page_label": "8",
+              "name": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "creationdate": "2014-11-22T23:34:56+01:00",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "moddate": "2014-11-18T07:27:18+05:30",
+              "hash": "8996bb27080ff33d990e29b7683fa46cf2ac3019925d726cc053d623a9bc6c39",
+              "producer": "PyPDF",
+              "start_index": 0,
+              "total_pages": 441,
+              "source": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "score": 0.6560860872268677
+            },
+            {
+              "start_index": 0,
+              "producer": "PyPDF",
+              "page_label": "361",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "source": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "file_id": "efac2fe6-7e50-4c83-99d0-a7f209b5a87e",
+              "creator": "PyPDF",
+              "hash": "8996bb27080ff33d990e29b7683fa46cf2ac3019925d726cc053d623a9bc6c39",
+              "creationdate": "2014-11-22T23:34:56+01:00",
+              "name": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "moddate": "2014-11-18T07:27:18+05:30",
+              "page": 358,
+              "total_pages": 441,
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "score": 0.6175318956375122
+            }
+          ],
+          "distances": [
+            0.6727864146232605,
+            0.6560860872268677,
+            0.6175318956375122
+          ]
+        }
+      ],
+      "source_names": [
+        "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+      ]
+    },
+    {
+      "id": "Q08",
+      "query": "《Pro Git》建议什么时候使用 rebase，什么时候用 merge？",
+      "expected": "rebase merge",
+      "expected_book": "Pro Git",
+      "hit_at_1": 1,
+      "hit_at_5": 1,
+      "latency_s": 31.51,
+      "answer": "根据《Pro Git》的内容，关于 rebase 和 merge 的使用建议如下 [1]：\n\n## 核心原则\n\n> \"rebase local changes you've made but haven't shared yet before you push them in order to clean up your story, but **never rebase anything you've pushed somewhere**.\"\n\n简单来说就是：**本地用 rebase，公开后用 merge**。\n\n---\n\n## 使用场景对比\n\n| 场景 | 推荐操作 | 原因 |\n|------|----------|------|\n| 本地提交，尚未推送到远程 | ✅ **Rebase** | 整理提交历史，让记录更清晰线性 |\n| 已推送到远程的提交 | ❌ **不要 Rebase** | 会破坏他人基于该提交的工作，引发混乱 |\n| 合并团队成员的分支 | ✅ **Merge** | 保留真实的协作历史 |\n\n---\n\n## 关键思想\n\n书中强调，**没有绝对的对错之分** [1]——rebase 和 merge 各有优劣，适合哪个取决于你的团队和项目需求。两者的本质区别在于：\n\n- **Merge**：保留完整的分叉与合并历史，真实反映发生了什么\n- **Rebase**：重写历史，让提交记录看起来更整洁线性\n\n---\n\n## 一句话记忆法\n\n> 🔁 **Rebase = 整理草稿（推送前）**\n> 🔀 **Merge = 记录历史（推送后）**\n\n你目前在项目中是独立开发还是团队协作？这会影响哪种策略更适合你的实际情况。",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "Now, to the question of whether merging or rebasing is better: hopefully you'll see that it's not that simple. Git is a\npowerful tool, and allows you to do many things to and with your history, but every team and every project is different.\nNow that you know how both of these things work, it's up to you to decide which one is best for your particular situation.\nIn general the way to get the best of both worlds is to rebase local changes you've made but haven't shared yet\nbefore you push them in order to clean up your story, but never rebase anything you've pushed somewhere.\nFigure 3-40. Rebase on top of force-pushed rebase work",
+            "Rebase When You Rebase������������������������������������������������������������������������������������������������������������������������������������75\nRebase vs� Merge ������������������������������������������������������������������������������������������������������������������������������������������������76\nSummary �������������������������������������������������������������������������������������������������������������������������������������77\nChapter 4: Git on the Server ■  ��������������������������������������������������������������������������������������������79\nThe Protocols ������������������������������������������������������������������������������������������������������������������������������79",
+            "Appendix C ■ Git CommAnds\n411\ngit mv\nThe git mv command is a thin convenience command to move a file and then run git add on the new file and git rm on\nthe old file. We only briefly mention this command in 'Moving Files' (Chapter 2).\ngit clean\nThe git clean command is used to remove unwanted files from your working directory. This could include removing\ntemporary build artifacts or merge conflict files. We cover many of the options and scenarios in which you might used\nthe clean command in 'Cleaning Your Working Directory' (Chapter 7).\nBranching and Merging\nThere are just a handful of commands that implement most of the branching and merging functionality in Git.\ngit branch\nThe git branch command is actually something of a branch management tool. It can list the branches you have,\ncreate a new branch, delete branches and rename branches."
+          ],
+          "metadata": [
+            {
+              "creator": "PyPDF",
+              "name": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "source": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "total_pages": 441,
+              "file_id": "efac2fe6-7e50-4c83-99d0-a7f209b5a87e",
+              "producer": "PyPDF",
+              "start_index": 0,
+              "page_label": "76",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "page": 76,
+              "moddate": "2014-11-18T07:27:18+05:30",
+              "hash": "8996bb27080ff33d990e29b7683fa46cf2ac3019925d726cc053d623a9bc6c39",
+              "creationdate": "2014-11-22T23:34:56+01:00",
+              "score": 0.6505444645881653
+            },
+            {
+              "hash": "8996bb27080ff33d990e29b7683fa46cf2ac3019925d726cc053d623a9bc6c39",
+              "creationdate": "2014-11-22T23:34:56+01:00",
+              "start_index": 0,
+              "creator": "PyPDF",
+              "page": 427,
+              "producer": "PyPDF",
+              "moddate": "2014-11-18T07:27:18+05:30",
+              "file_id": "efac2fe6-7e50-4c83-99d0-a7f209b5a87e",
+              "name": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "total_pages": 441,
+              "source": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "page_label": "x",
+              "score": 0.565221905708313
+            },
+            {
+              "hash": "8996bb27080ff33d990e29b7683fa46cf2ac3019925d726cc053d623a9bc6c39",
+              "start_index": 0,
+              "producer": "PyPDF",
+              "total_pages": 441,
+              "page": 406,
+              "file_id": "efac2fe6-7e50-4c83-99d0-a7f209b5a87e",
+              "page_label": "411",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "creator": "PyPDF",
+              "source": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "creationdate": "2014-11-22T23:34:56+01:00",
+              "name": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "moddate": "2014-11-18T07:27:18+05:30",
+              "score": 0.5405672192573547
+            }
+          ],
+          "distances": [
+            0.6505444645881653,
+            0.565221905708313,
+            0.5405672192573547
+          ]
+        }
+      ],
+      "source_names": [
+        "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+      ]
+    },
+    {
+      "id": "Q09",
+      "query": "《Pro Git》里 git fetch 和 git pull 的区别是什么？",
+      "expected": "fetch pull",
+      "expected_book": "Pro Git",
+      "hit_at_1": 1,
+      "hit_at_5": 1,
+      "latency_s": 28.93,
+      "answer": "## `git fetch` 与 `git pull` 的区别\n\n根据《Pro Git》的内容，两者的核心区别如下：\n\n### `git fetch`\n- 从远程仓库**拉取所有新数据**到本地数据库 [1]\n- **不会**自动合并（merge）到你当前的工作分支 [1]\n- 拉取后，你需要**手动执行合并**操作\n- 更安全——你可以先检查远程变更，再决定如何整合\n\n```bash\n$ git fetch [remote-name]\n# 之后需要手动 merge\n```\n\n### `git pull`\n- 本质上是 **`git fetch` + `git merge` 的组合** [1]\n- 从指定远程仓库拉取数据后，**立即尝试自动合并**到当前分支 [1]\n- 操作更简便，但控制粒度较低\n\n```bash\n$ git pull\n# 等价于 fetch + merge，一步完成\n```\n\n### 一句话总结\n\n| | 拉取远程数据 | 自动合并 |\n|---|---|---|\n| `git fetch` | ✅ | ❌（手动） |\n| `git pull` | ✅ | ✅（自动） |\n\n> 💡 **建议**：在不确定远程有哪些变更时，优先用 `git fetch` 先查看，再决定是否合并——这样可以避免意外的冲突或覆盖。\n\n---\n\n你目前对 Git 的分支（branch）和合并（merge）机制了解多少？这会帮助我判断是否需要进一步解释\"手动合并\"的操作方式。",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "database. When you are ready to share your work or pull changes from elsewhere, there are a handful of commands\nthat deal with remote repositories.\ngit fetch\nThe git fetch command communicates with a remote repository and fetches down all the information that is in that\nrepository that is not in your current one and stores it in your local database.\nWe first look at this command in \"Fetching and Pulling from Your Remotes\" (Chapter 2) and •\nwe continue to see examples of it use in \"Remote Branches\" (Chapter 3).\nWe also use it in several of the examples in \"Contributing to a Project\" (Chapter 5).•\nWe use it to fetch a single specific reference that is outside of the default space in \"Pull Request •\nRefs\" (Chapter 6) and we see how to fetch from a bundle in \"Bundling\" (Chapter 7).\nWe set up highly custom refspecs in order to make • git fetch do something a little different",
+            "them in much more detail in Chapter 3).\nFetching and Pulling from Your Remotes\nAs you just saw, to get data from your remote projects, you can run:\n$ git fetch [remote-name]\nThe command goes out to that remote project and pulls down all the data from that remote project that you don't\nhave yet. After you do this, you should have references to all the branches from that remote, which you can merge in\nor inspect at any time.\nIf you clone a repository, the command automatically adds that remote repository under the name \"origin. \" So,\ngit fetch origin fetches any new work that has been pushed to that server since you cloned (or last fetched from)\nit. It's important to note that the git fetch command pulls the data to your local repository—it doesn't automatically\nmerge it with any of your work or modify what you're currently working on. You have to merge it manually into your",
+            "Appendix C ■ Git CommAnds\n414\ngit pull\nThe git pull command is basically a combination of the git fetch and git merge commands, where Git will fetch\nfrom the remote you specify and then immediately try to merge it into the branch you're on.\nWe introduce it quickly in \"Fetching and Pulling from Your Remotes\" (Chapter 2) and show •\nhow to see what it will merge if you run it in \"Inspecting a Remote\" (Chapter 2).\nWe also see how to use it to help with rebasing difficulties in \"Rebase when you Rebase\" •\n(Chapter 3).\nWe show how to use it with a URL to pull in changes in a one-off fashion in \"Checking Out •\nRemote Branches\" (Chapter 5).\nFinally, we very quickly mention that you can use the • --verify-signatures option to it in\norder to verify that commits you are pulling have been GPG signed in \"Signing Commits\"\n(Chapter 7).\ngit push"
+          ],
+          "metadata": [
+            {
+              "hash": "8996bb27080ff33d990e29b7683fa46cf2ac3019925d726cc053d623a9bc6c39",
+              "source": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "page_label": "413",
+              "page": 408,
+              "moddate": "2014-11-18T07:27:18+05:30",
+              "name": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "creationdate": "2014-11-22T23:34:56+01:00",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "start_index": 0,
+              "producer": "PyPDF",
+              "creator": "PyPDF",
+              "total_pages": 441,
+              "file_id": "efac2fe6-7e50-4c83-99d0-a7f209b5a87e",
+              "score": 0.6445021629333496
+            },
+            {
+              "hash": "8996bb27080ff33d990e29b7683fa46cf2ac3019925d726cc053d623a9bc6c39",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "page_label": "35",
+              "start_index": 0,
+              "total_pages": 441,
+              "creator": "PyPDF",
+              "name": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "moddate": "2014-11-18T07:27:18+05:30",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "file_id": "efac2fe6-7e50-4c83-99d0-a7f209b5a87e",
+              "page": 36,
+              "producer": "PyPDF",
+              "source": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "creationdate": "2014-11-22T23:34:56+01:00",
+              "score": 0.6428404450416565
+            },
+            {
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "start_index": 0,
+              "creator": "PyPDF",
+              "file_id": "efac2fe6-7e50-4c83-99d0-a7f209b5a87e",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "source": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "page": 409,
+              "producer": "PyPDF",
+              "creationdate": "2014-11-22T23:34:56+01:00",
+              "hash": "8996bb27080ff33d990e29b7683fa46cf2ac3019925d726cc053d623a9bc6c39",
+              "name": "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "page_label": "414",
+              "moddate": "2014-11-18T07:27:18+05:30",
+              "total_pages": 441,
+              "score": 0.6198748350143433
+            }
+          ],
+          "distances": [
+            0.6445021629333496,
+            0.6428404450416565,
+            0.6198748350143433
+          ]
+        }
+      ],
+      "source_names": [
+        "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "Pro Git (Scott Chacon, Ben Straub) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+      ]
+    },
+    {
+      "id": "Q10",
+      "query": "《The Pragmatic Programmer》里 Broken Windows 理念在代码维护中怎么应用？",
+      "expected": "Broken Windows",
+      "expected_book": "Pragmatic Programmer",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 70.21,
+      "answer": "## Broken Windows 理念在代码维护中的应用\n\n现在我已检索到《The Pragmatic Programmer》的原文，让我用书中的实际内容来回答你。\n\n---\n\n### 🪟 理论根源：Software Entropy（软件熵）\n\n书中在 **Topic 3: Software Entropy** 中引入这一概念 [1]：\n\n> 软件中无序度的增加被称为\"software rot\"（软件腐化），有些人乐观地称之为\"技术债\"——并暗示自己某天会还清。但他们很可能不会。\n\n关键洞察是：**腐化的最重要驱动力不是技术，而是项目的心理氛围和文化。**\n\n---\n\n### 🔑 核心原则：\"Don't Live With Broken Windows\"\n\n书中明确给出行动准则 [1]：\n\n> *\"Next time you see a piece of code that isn't quite as it should be, fix it. Manage the pain: if it hurts now, but is going to hurt even more later, you might as well get it over with.\"*\n\n**实际操作层面：**\n- 看到不对劲的代码 → 立刻修\n- 无法立刻修 → 明确标记（TODO/FIXME），让团队知道这是\"临时状态\"而非\"接受标准\"\n- 重构时，若需修改外部接口 → 故意让构建失败，强迫相关调用方更新\n\n---\n\n### 👥 团队层面的应用\n\n书中在 **Topic 84: Maintain Small, Stable Teams** 中将此理念扩展到团队 [1]：\n\n> *\"Quality is a team issue. The most diligent developer placed on a team that just doesn't care will find it difficult to maintain the enthusiasm needed to fix niggling problems.\"*\n\n几个关键点：\n\n| 观点 | 含义 |\n|---|---|\n| **质量是团队问题** | 一个人单打独斗无法持续维护质量 |\n| **团队不能容忍破窗** | 小缺陷若无人修，会发出\"质量无人在乎\"的信号 |\n| **\"质量官员\"是个笑话** | 质量只能来自每个成员的贡献，不能外包给某个角色 |\n\n> *\"Quality is built in, not bolted on.\"* [1]\n\n---\n\n### 🔗 与 TDD 的联系\n\n这与你文档中的 TDD 理念形成完美闭环 [1]：\n\n- TDD 的**重构阶段**（红-绿-**重构**）= 在每次迭代后立刻修破窗\n- Broken Windows 理论提供的是**文化土壤**，TDD 提供的是**技术机制**，两者缺一不可\n\n---\n\n### 💡 一个值得思考的问题\n\n书中强调破窗效应的核心是**心理氛围**——当团队默认\"这里的质量没人管\"，个人再努力也难以为继。\n\n> 在你目前的开发环境中，团队对\"小问题\"的默认态度是什么？是\"先过了再说\"，还是\"发现就修\"？这种默契是如何形成的？",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "到80%就已经很优秀\ngreen excuses all sins. But only for a moment.\n了。仅仅通过分解目\nMake it right. Now that the system is behaving, put the sinful ways of the\n标就可以达到这一效\n果,先让代码Work,\nd        o  s\n再让它 Clean。\nsoftware righteousness. Remove the duplication that you have introduced.\nand get to green quickly\n我们终于发现了\nTDD 与其他 DD\nThe goal is clean code that works (thanks to Ron Jeffries for this pithy sum-\n比如ADD(体系结构\nmary). Clean code that works is out of the reach of even the best programmers\n驱动开发)之间的不\nsome of the time, and out of the reach of most programmers (like me) most of\n同!同样是以分解目\nthe time. Divide and conquer, baby. First we'll solve the \"that works\" part of\n标的方式解决问题,\nthe problem. Then we'll solve the \"clean code\" part. This is the opposite of\n前者首先要求代码\narchitecture-driven development, where you solve\n\"clean code\" first, then\nWork,再i让它 Clean,",
+            "请记住CleanCode\nwish you had. Include all of the elements in the story that you imagine will\nThat Works 是我们\nbe necessary to calculate the right answers.\n追求的永恒目标,但\n正因为如此,它才是\nMake it run. Quickly getting that bar to go to green dominates everything\n那么难以达到。事实\nelse. If a clean, simple solution is obvious, then type it in. If the clean, sim-\n上,根据二八原则,\nple solution is obvious but it will take you a minute, then make a note of it\n在方法正确的情况\n下,只需要目前 20%\nand get back to the main problem, which is getting the bar green in sec-\n的精力就可以达到\nonds. This shift in aesthetics is hard for some experienced software engi-\n80%的目标,而一旦达\nneers. They only know how to follow the rules of good engineering. Quick\n到80%就已经很优秀\ngreen excuses all sins. But only for a moment.\n了。仅仅通过分解目\nMake it right. Now that the system is behaving, put the sinful ways of the\n标就可以达到这一效\n果,先让代码Work,\nd        o  s\n再让它 Clean。",
+            "7\n\"代码整洁有效\"(Cleancode thatworks),RonJeffrey的这句精辟的短语成为了测试驱动开\n发(TDD)的目标。基于以下的原因,Clean code thatworks是值得我们去实现的目标。\n它是一种可预测的开发方式。你可以知道什么时候能做完,而不用担心会有一长串的bug\n尾随着你。\n·它给你一个机会,让你可以学习所有代码能够教给你的方法。如果只是采用首先想到的\n方法,那么你将没有时间再考虑另一个更好的方法。\n它将给予你的软件使用者更美好的使用体验。\n它可以让团队内部之间互相信赖。\n把它写出来的感觉简直太棒了。\n远离有效的代码。不过不用过多考虑这些恐惧,我们应该做的是:使用一组自动测试一—测试驱\n动开发(TDD)的风格一—来推动我们的开发工作。在测试驱动开发中,应该:\n仅当测试失败的时候编写新代码;\n消除重复代码。\n这是两条简单的规则,但是它们会产生复杂个体和群体的行为规范,并具有以下技术含义:\n必须有机地进行设计,让运行着的代码在不同决策之间提供反馈;\n必须自己动手编写测试程序,因为我们不能每天浪费很多时间去等待别人编写测试程序;\n我们的开发环境必须对微小的变化提供快速的反应;\n为了简化测试,我们的设计必须由许多高内聚、低耦合的部分组成。\n这两条原则还暗示了编程任务的一种顺序。\n(1)红色一—编写一个短小的、不能运行的甚至一开始可能无法编译通过的测试程序。\n(2)绿色—尽快使测试得以通过,为此不惜做一些合理但是必要的事情。\n============================================================\nPage 10\n============================================================\n测试驱动开发(注释版)\n(3)重构一—一消除上一步中产生的所有重复代码。\n红色/绿色/重构一一这是TDD的口头禅。\n假设现在这种编程风格已经可行,那么它可能更进一步极大地减少代码的错误密度,并且使"
+          ],
+          "metadata": [
+            {
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "start_index": 0,
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "score": 0.6225219368934631
+            },
+            {
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "start_index": 0,
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "score": 0.6150195002555847
+            },
+            {
+              "hash": "8972a89c361c8602dd3e51a541068aef369f55c53d1e523eb31d1c4f30f14bf0",
+              "start_index": 0,
+              "name": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "file_id": "ff8576a5-54ce-45ad-8e44-b5326e9fd99c",
+              "source": "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "score": 0.5852447748184204
+            }
+          ],
+          "distances": [
+            0.6225219368934631,
+            0.6150195002555847,
+            0.5852447748184204
+          ]
+        }
+      ],
+      "source_names": [
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt",
+        "TEST-DRIVEN DEVELOPMENT BY EXAMPLE ([美]KENT BECK著 孙方注释) (z-library.sk, 1lib.sk, z-lib.sk).txt"
+      ]
+    },
+    {
+      "id": "Q11",
+      "query": "In APOSD, what is the practical definition of a deep module?",
+      "expected": "deep module",
+      "expected_book": "A Philosophy of Software Design",
+      "hit_at_1": 1,
+      "hit_at_5": 1,
+      "latency_s": 25.6,
+      "answer": "Great question! This touches on one of the core design principles in *A Philosophy of Software Design*.\n\n## Deep Modules — Practical Definition\n\nAccording to the book, a **deep module** is one that provides **powerful functionality hidden behind a simple interface** [1].\n\nThe author uses a helpful visual metaphor: imagine each module as a **rectangle** [1]:\n\n- The **area** of the rectangle = the module's **functionality** (bigger is better)\n- The **top edge** = the module's **interface** (shorter/simpler is better)\n\nA **deep module** has a large area but a narrow top edge — lots of functionality, minimal interface exposure.\n\n## The Cost-Benefit Framing\n\nThe book frames module depth explicitly in economic terms [1]:\n\n- **Benefit** = the functionality the module provides\n- **Cost** = the complexity of its interface (what it imposes on the rest of the system)\n\n> *\"The best modules are those with the greatest benefit and the least cost.\"* [1]\n\n## Concrete Examples from the Book\n\nTwo classic examples of deep modules [1]:\n\n1. **Unix I/O** — Five simple system calls (`open`, `read`, `write`, `close`, `stat`) that have remained stable for decades while the underlying implementation evolved radically\n2. **Garbage collectors** (Go/Java) — Literally *no* interface at all; they work invisibly and actually *shrink* overall system complexity\n\n## The Key Takeaway\n\nA deep module is a **good abstraction** precisely because users only see a tiny fraction of the internal complexity. More interface is *not* better — it's a cost [1].\n\n---\n\n**Reflection question:** Can you think of a module or library you've used recently that felt \"shallow\" — where the interface seemed more complex than the value it provided? What made it feel that way?",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "of a rectangle represents the module's interface; the length of that edge\nindicates the complexity of the interface. The best modules are deep: they\nhave a lot of functionality hidden behind a simple interface. A deep\nmodule is a good abstraction because only a small fraction of its internal\ncomplexity is visible to its users.\nModule depth is a way of thinking about cost versus benefit. The\nbenefit provided by a module is its functionality. The cost of a module (in\nterms of system complexity) is its interface. A module's interface\nrepresents the complexity that the module imposes on the rest of the\nsystem: the smaller and simpler the interface, the less complexity that it\nintroduces. The best modules are those with the greatest benefit and the\nleast cost. Interfaces are good, but more, or larger, interfaces are not\nnecessarily better!",
+            "the mechanisms for electrical motors, battery power management, anti-\nlock brakes, cruise control, and so on.\nFigure 4.1: Deep and shallow modules. The best modules are deep: they allow a lot of\nfunctionality to be accessed through a simple interface. A shallow module is one with a relatively\ncomplex interface, but not much functionality: it doesn't hide much complexity.\n4.4Deep modules\nThe best modules are those that provide powerful functionality yet have\nsimple interfaces. I use the term deep to describe such modules. To\nvisualize the notion of depth, imagine that each module is represented by a\nrectangle, as shown in Figure 4.1. The area of each rectangle is\nproportional to the functionality implemented by the module. The top edge\nof a rectangle represents the module's interface; the length of that edge\nindicates the complexity of the interface. The best modules are deep: they",
+            "system calls. Implementations of the Unix I/O interface have evolved\nradically over the years, but the five basic kernel calls have not changed.\nAnother example of a deep module is the garbage collector in a\nlanguage such as Go or Java. This module has no interface at all; it works\ninvisibly behind the scenes to reclaim unused memory. Adding garbage\ncollection to a system actually shrinks its overall interface, since it\neliminates the interface for freeing objects. The implementation of a\ngarbage collector is quite complex, but that complexity is hidden from\nprogrammers.\nDeep modules such as Unix I/O and garbage collectors provide\npowerful abstractions because they are easy to use, yet they hide\nsignificant implementation complexity.\n4.5Shallow modules\nOn the other hand, a shallow module is one whose interface is relatively"
+          ],
+          "metadata": [
+            {
+              "creator": "",
+              "page_label": "38",
+              "moddate": "2024-07-23T20:06:37+00:00",
+              "producer": "ConvertAPI",
+              "page": 37,
+              "author": "John K. Ousterhout",
+              "total_pages": 210,
+              "hash": "00f265160bddf3256c3e387db9587b68aaa19eeb193c98ea5fc15a27fc43738d",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "name": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "title": "A Philosophy of Software Design, 2nd Edition",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "file_id": "497750d0-7f87-4137-bf6b-7521053db2de",
+              "start_index": 0,
+              "source": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "creationdate": "2024-07-23T20:06:33+00:00",
+              "score": 0.7509408593177795
+            },
+            {
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "page": 37,
+              "page_label": "38",
+              "file_id": "497750d0-7f87-4137-bf6b-7521053db2de",
+              "title": "A Philosophy of Software Design, 2nd Edition",
+              "name": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "creationdate": "2024-07-23T20:06:33+00:00",
+              "source": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "moddate": "2024-07-23T20:06:37+00:00",
+              "total_pages": 210,
+              "start_index": 0,
+              "producer": "ConvertAPI",
+              "author": "John K. Ousterhout",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "hash": "00f265160bddf3256c3e387db9587b68aaa19eeb193c98ea5fc15a27fc43738d",
+              "creator": "",
+              "score": 0.7014753818511963
+            },
+            {
+              "creationdate": "2024-07-23T20:06:33+00:00",
+              "name": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "producer": "ConvertAPI",
+              "title": "A Philosophy of Software Design, 2nd Edition",
+              "moddate": "2024-07-23T20:06:37+00:00",
+              "source": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "creator": "",
+              "author": "John K. Ousterhout",
+              "total_pages": 210,
+              "page": 39,
+              "start_index": 0,
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "file_id": "497750d0-7f87-4137-bf6b-7521053db2de",
+              "hash": "00f265160bddf3256c3e387db9587b68aaa19eeb193c98ea5fc15a27fc43738d",
+              "page_label": "40",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "score": 0.6298254728317261
+            }
+          ],
+          "distances": [
+            0.7509408593177795,
+            0.7014753818511963,
+            0.6298254728317261
+          ]
+        }
+      ],
+      "source_names": [
+        "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+      ]
+    },
+    {
+      "id": "Q12",
+      "query": "In APOSD, how does the book distinguish tactical programming vs strategic programming?",
+      "expected": "tactical strategic",
+      "expected_book": "A Philosophy of Software Design",
+      "hit_at_1": 1,
+      "hit_at_5": 1,
+      "latency_s": 45.27,
+      "answer": "The book also reinforces this distinction in **Chapter 16** when discussing how to handle modifications to existing code. Here are some additional nuances worth highlighting:\n\n---\n\n## Extended Picture: Staying Strategic Over Time\n\n### The Danger Zone — Modifying Existing Code\nChapter 16 points out that the tactical vs. strategic battle doesn't just happen at the *start* of a project — it recurs every time you touch existing code. The typical tactical mindset when making changes is:\n\n> *\"What is the smallest possible change I can make that [gets this working]?\"*\n\nThis is exactly the wrong question to ask if you care about long-term design quality.\n\n### Proactive vs. Reactive Strategic Investment\nThe book distinguishes **two forms** of strategic investment:\n\n| Type | Description |\n|------|-------------|\n| **Proactive** | Thinking carefully about design *before* writing new code |\n| **Reactive** | When you discover a design mistake, *fix it properly* rather than patching around it |\n\nThe key insight: strategic programming is not a one-time upfront decision — it's a **continuous habit** of making small improvements rather than accumulating small bits of complexity.\n\n### The Startup Trap\nThe book also addresses a common rationalization: startups often go tactical thinking *\"we'll clean it up once we're successful and can hire more engineers.\"* The book's warning is blunt — once a codebase turns to spaghetti, **it is nearly impossible to fix**, and you'll pay high development costs for the life of the product.\n\n---\n\n## Summary Mental Model\n\n```\nTactical: \"Does it work?\" → ship it → complexity grows → slower forever\nStrategic: \"Is the design good?\" → invest continuously → complexity controlled → faster long-term\n```\n\n---\n\n**A question to deepen your thinking:** When you encounter a bug fix or small feature request in your own work, what's your instinctive first question — and does it lean tactical or strategic?",
+      "sources": [
+        {
+          "source": {
+            "type": "collection",
+            "id": "409abb3c-1523-4468-bb62-4bd0ea55e300",
+            "name": "software-engineering"
+          },
+          "document": [
+            "recover the cost of the initial investment. Figure 3.1 illustrates this\nphenomenon.\nFigure 3.1: At the beginning, a tactical approach to programming will make progress more\nquickly than a strategic approach. However, complexity accumulates more rapidly under the\ntactical approach, which reduces productivity. Over time, the strategic approach results in greater\nprogress. Note: this figure is intended only as a qualitative illustration; I am not aware of any\nempirical measurements of the precise shapes of the curves.\nConversely, if you program tactically, you will finish your first projects\n10–20% faster, but over time your development speed will slow as\ncomplexity accumulates. It won't be long before you're programming at\nleast 10–20% slower. You will quickly give back all of the time you saved\nat the beginning, and for the rest of system's lifetime you will be",
+            "least 10–20% slower. You will quickly give back all of the time you saved\nat the beginning, and for the rest of system's lifetime you will be\ndeveloping more slowly than if you had taken the strategic approach. If\nyou haven't ever worked in a badly degraded code base, talk to someone\nwho has; they will tell you that poor code quality slows development by at\nleast 20%.\nThe term technical debt is often used to describe the problems caused\nby tactical programming. By programming tactically you are borrowing",
+            "Chapter 3\nWorking Code Isn't Enough\n(Strategic vs. Tactical Programming)\nOne of the most important elements of good software design is the\nmindset you adopt when you approach a programming task. Many\norganizations encourage a tactical mindset, focused on getting features\nworking as quickly as possible. However, if you want a good design, you\nmust take a more strategic approach where you invest time to produce\nclean designs and fix problems. This chapter discusses why the strategic\napproach produces better designs and is actually cheaper than the tactical\napproach over the long run.\n3.1Tactical programming\nMost programmers approach software development with a mindset I call\ntactical programming. In the tactical approach, your main focus is to get\nsomething working, such as a new feature or a bug fix. At first glance this"
+          ],
+          "metadata": [
+            {
+              "producer": "ConvertAPI",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "name": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "page": 29,
+              "source": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "page_label": "30",
+              "creator": "",
+              "file_id": "497750d0-7f87-4137-bf6b-7521053db2de",
+              "creationdate": "2024-07-23T20:06:33+00:00",
+              "total_pages": 210,
+              "start_index": 0,
+              "author": "John K. Ousterhout",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "title": "A Philosophy of Software Design, 2nd Edition",
+              "moddate": "2024-07-23T20:06:37+00:00",
+              "hash": "00f265160bddf3256c3e387db9587b68aaa19eeb193c98ea5fc15a27fc43738d",
+              "score": 0.7370891571044922
+            },
+            {
+              "start_index": 0,
+              "page_label": "30",
+              "page": 29,
+              "producer": "ConvertAPI",
+              "name": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "file_id": "497750d0-7f87-4137-bf6b-7521053db2de",
+              "source": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "moddate": "2024-07-23T20:06:37+00:00",
+              "creationdate": "2024-07-23T20:06:33+00:00",
+              "author": "John K. Ousterhout",
+              "title": "A Philosophy of Software Design, 2nd Edition",
+              "creator": "",
+              "hash": "00f265160bddf3256c3e387db9587b68aaa19eeb193c98ea5fc15a27fc43738d",
+              "total_pages": 210,
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "score": 0.7143569588661194
+            },
+            {
+              "moddate": "2024-07-23T20:06:37+00:00",
+              "embedding_config": "{'engine': '', 'model': 'sentence-transformers/all-MiniLM-L6-v2'}",
+              "source": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "title": "A Philosophy of Software Design, 2nd Edition",
+              "total_pages": 210,
+              "creator": "",
+              "name": "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+              "author": "John K. Ousterhout",
+              "created_by": "7653d215-8ed0-42c0-948f-ee124cd51bd6",
+              "page_label": "27",
+              "hash": "00f265160bddf3256c3e387db9587b68aaa19eeb193c98ea5fc15a27fc43738d",
+              "page": 26,
+              "start_index": 0,
+              "producer": "ConvertAPI",
+              "file_id": "497750d0-7f87-4137-bf6b-7521053db2de",
+              "creationdate": "2024-07-23T20:06:33+00:00",
+              "score": 0.7127352356910706
+            }
+          ],
+          "distances": [
+            0.7370891571044922,
+            0.7143569588661194,
+            0.7127352356910706
+          ]
+        }
+      ],
+      "source_names": [
+        "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf",
+        "A Philosophy of Software Design, 2nd Edition (John K. Ousterhout) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+      ]
+    },
+    {
+      "id": "Q13",
+      "query": "In The Pragmatic Programmer, what is \"orthogonality\" in system design?",
+      "expected": "orthogonality",
+      "expected_book": "Pragmatic Programmer",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq1uLEGTLBfXS74mHtF\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q14",
+      "query": "In The Pragmatic Programmer, why is \"automation\" emphasized for engineering quality?",
+      "expected": "automation",
+      "expected_book": "Pragmatic Programmer",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq2VNMjrR7xqQZJkpir\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q15",
+      "query": "In Tidy First, what is the difference between behavior change and structure change?",
+      "expected": "behavior structure",
+      "expected_book": "Tidy First",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq34MEY3YqJ9YcGEPnC\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q16",
+      "query": "In TDD by Example, how are tests used to drive design decisions?",
+      "expected": "tests drive design",
+      "expected_book": "TDD",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq3cjtZdtyuMvb2oYtr\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q17",
+      "query": "In Pro Git, what does git reset --soft change compared with --mixed?",
+      "expected": "reset soft mixed",
+      "expected_book": "Pro Git",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq49WpDfVGHyb3ABBFF\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q18",
+      "query": "In Pro Git, when should git cherry-pick be preferred?",
+      "expected": "cherry-pick",
+      "expected_book": "Pro Git",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq4hiovKFnoNxw5XDuU\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q19",
+      "query": "In Pro Git, what does HEAD represent and why does it matter?",
+      "expected": "HEAD",
+      "expected_book": "Pro Git",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq5G9wqQakG13dmoGkc\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q20",
+      "query": "In Tidy First, why are small reversible changes preferred?",
+      "expected": "small reversible",
+      "expected_book": "Tidy First",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq5qFXQFSVcV3BjHeUm\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q21",
+      "query": "解释一下 APOSD 的 deep module。",
+      "expected": "deep module",
+      "expected_book": "A Philosophy of Software Design",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq6QZVmrGdBxAVzcr9F\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q22",
+      "query": "给一个在实际代码里的例子。",
+      "expected": "example",
+      "expected_book": "A Philosophy of Software Design",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq6wnhk49B2DGHsXMdf\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q23",
+      "query": "那 shallow module 在这里对应什么反例？",
+      "expected": "shallow module",
+      "expected_book": "A Philosophy of Software Design",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq7W2w77RqfETuDjUmt\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q24",
+      "query": "总结一下 TDD by Example 的核心流程。",
+      "expected": "red-green-refactor",
+      "expected_book": "TDD",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq85P8XCPAzpLo3hf1s\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q25",
+      "query": "那这个流程在重构旧代码时怎么用？",
+      "expected": "refactor old code",
+      "expected_book": "TDD",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq8dWfhoY4RxVbiKahu\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q26",
+      "query": "Pro Git 里讲的三棵树模型再解释一下。",
+      "expected": "three trees",
+      "expected_book": "Pro Git",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq9E72hjBzz3QWvgqtD\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q27",
+      "query": "那我刚才这个场景应该用哪种 reset？",
+      "expected": "reset",
+      "expected_book": "Pro Git",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSq9oAd3zeYm1xTpd4ey\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    },
+    {
+      "id": "Q28",
+      "query": "如果 TDD 中测试很难下手，应该如何拆小需求？",
+      "expected": "split requirements",
+      "expected_book": "TDD",
+      "error": "API error: {'message': 'Error: LLM service unavailable — litellm.RateLimitError: RateLimitError: OpenAIException - {\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account\\'s rate limit. Please try again later.\"},\"request_id\":\"req_011CYSqAMbkjmkWoYBdsXwd6\"}', 'type': 'proxy_error'}",
+      "hit_at_1": 0,
+      "hit_at_5": 0,
+      "latency_s": 0,
+      "answer": "",
+      "sources": [],
+      "source_names": []
+    }
+  ]
+}
