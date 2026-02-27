@@ -1,0 +1,36 @@
+# Multi-provider configuration for Mentor Agent Service
+# This file is REQUIRED — the service will not start without it.
+#
+# Migration from old LITELLM_* env vars:
+#   1. Copy your LITELLM_BASE_URL, LITELLM_KEY, LITELLM_MODEL values here
+#   2. Remove LITELLM_* env vars from .env (they are no longer read)
+#   3. Restart the service
+#
+# Environment variable expansion:
+#   api_key supports ${ENV_VAR} syntax (e.g., "${NVIDIA_NIM_API_KEY}")
+#   Subscription providers use "sk-unused" (OAuth, no API key needed).
+#
+# Note: claude-sub and gpt-sub both point to unified-proxy.
+# The proxy routes requests internally based on model name.
+
+providers:
+  - id: "claude-sub"
+    display_name: "Claude Sonnet 4.6"
+    base_url: "http://unified-proxy:3456/v1"
+    api_key: "sk-unused"              # OAuth handled by proxy
+    model: "claude-sonnet-4-6"
+
+  - id: "nvidia-nim"
+    display_name: "NVIDIA NIM (Llama 3.1 70B)"
+    base_url: "https://integrate.api.nvidia.com/v1"
+    api_key: "${NVIDIA_NIM_API_KEY}"
+    # Previous DeepSeek V3.2 config (kept for reference):
+    # model: "openai/deepseek-ai/deepseek-v3.2"
+    # Note: currently unstable on this NIM route (repeated 45-90s timeouts).
+    model: "openai/meta/llama-3.1-70b-instruct"
+
+  - id: "gpt-sub"
+    display_name: "GPT-5.2"
+    base_url: "http://unified-proxy:3456/v1"
+    api_key: "sk-unused"
+    model: "gpt-5.2"

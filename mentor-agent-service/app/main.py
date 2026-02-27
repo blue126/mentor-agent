@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
+from app.config import ConfigurationError, get_providers
 from app.dependencies import verify_api_key
 from app.routers import chat, health
 
@@ -16,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Fail fast: validate provider configuration before accepting requests
+    try:
+        providers = get_providers()
+        logger.info("Loaded %d providers: %s", len(providers), [p.id for p in providers])
+    except ConfigurationError as exc:
+        logger.error("Provider configuration failed: %s", exc)
+        raise SystemExit(1) from exc
+
     # Run Alembic migrations on startup (idempotent — already-applied revisions are skipped)
     try:
         subprocess.run(["alembic", "upgrade", "head"], check=True)

@@ -1,12 +1,19 @@
-"""Unit tests for ProviderConfig, get_providers(), and resolve_provider()."""
+"""Unit tests for ProviderConfig, get_providers(), resolve_provider(), and YAML loading."""
 
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from app.config import (
+    ConfigurationError,
     ProviderConfig,
+    _expand_env_vars,
     _normalize_model_for_litellm,
     _sanitize_provider_id,
     get_providers,
+    load_providers_from_yaml,
+    reset_providers_cache,
     resolve_provider,
 )
 
@@ -14,9 +21,10 @@ from app.config import (
 # _normalize_model_for_litellm tests
 # ---------------------------------------------------------------------------
 
+
 def test_normalize_proxy_url_adds_openai_prefix():
     """Proxy URL → model gets 'openai/' prefix."""
-    result = _normalize_model_for_litellm("sonnet", "http://claude-max-proxy:3456/v1")
+    result = _normalize_model_for_litellm("sonnet", "http://unified-proxy:3456/v1")
     assert result == "openai/sonnet"
 
 
@@ -42,6 +50,7 @@ def test_normalize_case_insensitive_url_match():
 # _sanitize_provider_id tests
 # ---------------------------------------------------------------------------
 
+
 def test_sanitize_provider_id_replaces_slash_with_dash():
     """Provider ID containing '/' → sanitized to '-'."""
     assert _sanitize_provider_id("openai/claude-sonnet-4-6") == "openai-claude-sonnet-4-6"
@@ -49,7 +58,7 @@ def test_sanitize_provider_id_replaces_slash_with_dash():
 
 def test_sanitize_provider_id_no_change_when_clean():
     """Clean provider ID → no change."""
-    assert _sanitize_provider_id("mentor-sub") == "mentor-sub"
+    assert _sanitize_provider_id("claude-sub") == "claude-sub"
 
 
 def test_sanitize_provider_id_logs_warning():
@@ -61,226 +70,382 @@ def test_sanitize_provider_id_logs_warning():
 
 
 # ---------------------------------------------------------------------------
-# get_providers() tests — single provider
+# _expand_env_vars tests
 # ---------------------------------------------------------------------------
 
-@patch("app.config.settings")
-def test_get_providers_single_provider_default(mock_settings):
-    """No alt config → get_providers() returns single primary provider."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://claude-max-proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = ""
-    mock_settings.litellm_display_name = ""
-    mock_settings.litellm_alt_base_url = ""
 
-    providers = get_providers()
+def test_expand_env_vars_resolves(monkeypatch: pytest.MonkeyPatch):
+    """${ENV_VAR} is replaced with its value."""
+    monkeypatch.setenv("MY_KEY", "secret-123")
+    assert _expand_env_vars("${MY_KEY}") == "secret-123"
+
+
+def test_expand_env_vars_missing_returns_none(monkeypatch: pytest.MonkeyPatch):
+    """Missing env var → returns None."""
+    monkeypatch.delenv("NONEXISTENT_VAR_XYZ", raising=False)
+    assert _expand_env_vars("${NONEXISTENT_VAR_XYZ}") is None
+
+
+def test_expand_env_vars_literal_passthrough():
+    """No ${...} pattern → string returned as-is."""
+    assert _expand_env_vars("plain-key") == "plain-key"
+
+
+# ---------------------------------------------------------------------------
+# load_providers_from_yaml tests
+# ---------------------------------------------------------------------------
+
+
+def _write_yaml(tmp_path: Path, content: str) -> Path:
+    p = tmp_path / "test-providers.yaml"
+    p.write_text(content)
+    return p
+
+
+def test_load_providers_basic(tmp_path: Path):
+    """Basic YAML with one provider loads correctly."""
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "claude-sub"
+    display_name: "Claude (Subscription)"
+    base_url: "http://unified-proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "claude-sonnet-4-6"
+""")
+    providers = load_providers_from_yaml(yaml_file)
     assert len(providers) == 1
-    assert providers[0].id == "sonnet"
-    assert providers[0].display_name == "sonnet"
+    p = providers[0]
+    assert p.id == "claude-sub"
+    assert p.display_name == "Claude (Subscription)"
+    assert p.base_url == "http://unified-proxy:3456/v1"
+    assert p.api_key == "sk-dev"
+    assert p.model == "openai/claude-sonnet-4-6"  # proxy → openai/ prefix
+
+
+def test_load_providers_multiple(tmp_path: Path):
+    """Multiple providers in YAML → all loaded."""
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "claude-sub"
+    display_name: "Claude (Subscription)"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+  - id: "mentor-api"
+    display_name: "Mentor (API)"
+    base_url: "https://api.anthropic.com"
+    api_key: "sk-ant-xxx"
+    model: "claude-sonnet-4-6"
+""")
+    providers = load_providers_from_yaml(yaml_file)
+    assert len(providers) == 2
+    assert providers[0].id == "claude-sub"
     assert providers[0].model == "openai/sonnet"
-    assert providers[0].base_url == "http://claude-max-proxy:3456/v1"
-    assert providers[0].api_key == "sk-dev"
+    assert providers[1].id == "mentor-api"
+    assert providers[1].model == "claude-sonnet-4-6"  # direct API → no prefix
 
 
-@patch("app.config.settings")
-def test_get_providers_single_provider_with_custom_id(mock_settings):
-    """Primary with custom ID/display name."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://claude-max-proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = "mentor-sub"
-    mock_settings.litellm_display_name = "Mentor (Subscription)"
-    mock_settings.litellm_alt_base_url = ""
+def test_load_providers_missing_file(tmp_path: Path):
+    """Non-existent YAML file → ConfigurationError."""
+    with pytest.raises(ConfigurationError, match="not found"):
+        load_providers_from_yaml(tmp_path / "nope.yaml")
 
-    providers = get_providers()
+
+def test_load_providers_invalid_yaml(tmp_path: Path):
+    """Malformed YAML → ConfigurationError."""
+    yaml_file = _write_yaml(tmp_path, "{{not valid yaml}}")
+    with pytest.raises(ConfigurationError, match="Invalid YAML"):
+        load_providers_from_yaml(yaml_file)
+
+
+def test_load_providers_missing_providers_key(tmp_path: Path):
+    """YAML without 'providers' key → ConfigurationError."""
+    yaml_file = _write_yaml(tmp_path, "something_else: true\n")
+    with pytest.raises(ConfigurationError, match="expected top-level"):
+        load_providers_from_yaml(yaml_file)
+
+
+def test_load_providers_skips_invalid_entries(tmp_path: Path):
+    """Provider with missing required field → skipped with warning, valid ones kept."""
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "good"
+    display_name: "Good"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+  - id: "bad-no-model"
+    display_name: "Bad"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+""")
+    providers = load_providers_from_yaml(yaml_file)
     assert len(providers) == 1
-    assert providers[0].id == "mentor-sub"
-    assert providers[0].display_name == "Mentor (Subscription)"
+    assert providers[0].id == "good"
 
 
-# ---------------------------------------------------------------------------
-# get_providers() tests — double active
-# ---------------------------------------------------------------------------
-
-@patch("app.config.settings")
-def test_get_providers_double_active(mock_settings):
-    """Both providers configured → get_providers() returns 2 providers."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://claude-max-proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = "mentor-sub"
-    mock_settings.litellm_display_name = "Mentor (Subscription)"
-    mock_settings.litellm_alt_base_url = "https://api.anthropic.com"
-    mock_settings.litellm_alt_key = "sk-ant-xxx"
-    mock_settings.litellm_alt_model = "claude-sonnet-4-6"
-    mock_settings.litellm_alt_provider_id = "mentor-api"
-    mock_settings.litellm_alt_display_name = "Mentor (API)"
-
-    providers = get_providers()
-    assert len(providers) == 2
-
-    primary = providers[0]
-    assert primary.id == "mentor-sub"
-    assert primary.display_name == "Mentor (Subscription)"
-    assert primary.model == "openai/sonnet"  # proxy → openai/ prefix
-
-    alt = providers[1]
-    assert alt.id == "mentor-api"
-    assert alt.display_name == "Mentor (API)"
-    assert alt.model == "claude-sonnet-4-6"  # direct API → no prefix
-    assert alt.base_url == "https://api.anthropic.com"
-    assert alt.api_key == "sk-ant-xxx"
+def test_load_providers_all_invalid_raises(tmp_path: Path):
+    """All providers invalid → ConfigurationError (zero valid providers)."""
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "bad"
+    display_name: "Bad"
+    base_url: "not-a-url"
+    api_key: "sk-dev"
+    model: "sonnet"
+""")
+    with pytest.raises(ConfigurationError, match="No valid provider"):
+        load_providers_from_yaml(yaml_file)
 
 
-@patch("app.config.settings")
-def test_get_providers_alt_defaults_id_from_model(mock_settings):
-    """Alt provider with no explicit ID → derives from model (slash → dash)."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = ""
-    mock_settings.litellm_display_name = ""
-    mock_settings.litellm_alt_base_url = "https://api.anthropic.com"
-    mock_settings.litellm_alt_key = "sk-ant"
-    mock_settings.litellm_alt_model = "claude-sonnet-4-6"
-    mock_settings.litellm_alt_provider_id = ""
-    mock_settings.litellm_alt_display_name = ""
-
-    providers = get_providers()
-    assert len(providers) == 2
-    alt = providers[1]
-    assert alt.id == "claude-sonnet-4-6"
-    assert alt.display_name == "claude-sonnet-4-6"
+def test_load_providers_env_var_expansion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """${ENV_VAR} in api_key gets expanded."""
+    monkeypatch.setenv("TEST_API_KEY", "resolved-secret")
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "test"
+    display_name: "Test"
+    base_url: "http://proxy:3456/v1"
+    api_key: "${TEST_API_KEY}"
+    model: "sonnet"
+""")
+    providers = load_providers_from_yaml(yaml_file)
+    assert providers[0].api_key == "resolved-secret"
 
 
-# ---------------------------------------------------------------------------
-# get_providers() tests — validation / skip secondary
-# ---------------------------------------------------------------------------
-
-@patch("app.config.logger")
-@patch("app.config.settings")
-def test_get_providers_skips_alt_missing_model(mock_settings, mock_logger):
-    """Alt base_url set but alt_model empty → skips secondary, logs warning."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = ""
-    mock_settings.litellm_display_name = ""
-    mock_settings.litellm_alt_base_url = "https://api.anthropic.com"
-    mock_settings.litellm_alt_key = "sk-ant"
-    mock_settings.litellm_alt_model = ""  # MISSING
-    mock_settings.litellm_alt_provider_id = ""
-    mock_settings.litellm_alt_display_name = ""
-
-    providers = get_providers()
-
+def test_load_providers_unresolved_env_var_skips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Unresolved ${ENV_VAR} → provider skipped."""
+    monkeypatch.delenv("NONEXISTENT_KEY_XYZ", raising=False)
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "good"
+    display_name: "Good"
+    base_url: "http://proxy:3456/v1"
+    api_key: "literal-key"
+    model: "sonnet"
+  - id: "bad"
+    display_name: "Bad"
+    base_url: "http://proxy:3456/v1"
+    api_key: "${NONEXISTENT_KEY_XYZ}"
+    model: "sonnet"
+""")
+    providers = load_providers_from_yaml(yaml_file)
     assert len(providers) == 1
-    mock_logger.warning.assert_called_once()
-    assert "LITELLM_ALT_MODEL" in str(mock_logger.warning.call_args)
+    assert providers[0].id == "good"
 
 
-# ---------------------------------------------------------------------------
-# get_providers() — provider ID derivation sanitises '/' to '-'
-# ---------------------------------------------------------------------------
-
-@patch("app.config.settings")
-def test_get_providers_primary_id_sanitizes_slash(mock_settings):
-    """Primary model 'openai/sonnet' with no explicit ID → derived ID has no slash."""
-    mock_settings.litellm_model = "openai/sonnet"
-    mock_settings.litellm_base_url = "http://proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = ""
-    mock_settings.litellm_display_name = ""
-    mock_settings.litellm_alt_base_url = ""
-
-    providers = get_providers()
+def test_load_providers_id_sanitization(tmp_path: Path):
+    """Provider ID with '/' → sanitized to '-'."""
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "openai/sonnet"
+    display_name: "Test"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+""")
+    providers = load_providers_from_yaml(yaml_file)
     assert providers[0].id == "openai-sonnet"
-    assert "/" not in providers[0].id
+
+
+def test_load_providers_model_normalization(tmp_path: Path):
+    """Proxy URL → model gets openai/ prefix; direct API → no prefix."""
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "proxy-provider"
+    display_name: "Proxy"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+  - id: "direct-provider"
+    display_name: "Direct"
+    base_url: "https://api.anthropic.com"
+    api_key: "sk-ant"
+    model: "claude-sonnet-4-6"
+""")
+    providers = load_providers_from_yaml(yaml_file)
+    assert providers[0].model == "openai/sonnet"
+    assert providers[1].model == "claude-sonnet-4-6"
+
+
+def test_load_providers_invalid_base_url_skips(tmp_path: Path):
+    """Invalid base_url (not http/https) → provider skipped."""
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "good"
+    display_name: "Good"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+  - id: "bad"
+    display_name: "Bad"
+    base_url: "ftp://invalid.com/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+""")
+    providers = load_providers_from_yaml(yaml_file)
+    assert len(providers) == 1
+    assert providers[0].id == "good"
+
+
+# ---------------------------------------------------------------------------
+# get_providers() tests — YAML-only loading
+# ---------------------------------------------------------------------------
+
+
+def test_get_providers_from_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """get_providers() loads from PROVIDERS_YAML_PATH."""
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "claude-sub"
+    display_name: "Mentor (Sub)"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+""")
+    reset_providers_cache()
+    from app.config import settings as _settings
+    monkeypatch.setattr(_settings, "providers_yaml_path", str(yaml_file))
+
+    providers = get_providers()
+    assert len(providers) == 1
+    assert providers[0].id == "claude-sub"
+
+
+def test_get_providers_missing_yaml_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """No YAML file anywhere → ConfigurationError."""
+    reset_providers_cache()
+    from app.config import settings as _settings
+    monkeypatch.setattr(_settings, "providers_yaml_path", str(tmp_path / "nope.yaml"))
+
+    with pytest.raises(ConfigurationError, match="not found"):
+        get_providers()
+
+
+def test_get_providers_caches_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """get_providers() caches after first call."""
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "cached"
+    display_name: "Cached"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+""")
+    reset_providers_cache()
+    from app.config import settings as _settings
+    monkeypatch.setattr(_settings, "providers_yaml_path", str(yaml_file))
+
+    p1 = get_providers()
+    p2 = get_providers()
+    assert p1 is p2  # Same object — cached
+
+
+def test_get_providers_default_location(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Empty PROVIDERS_YAML_PATH → falls back to ./providers.yaml if it exists."""
+    reset_providers_cache()
+    from app.config import settings as _settings
+    monkeypatch.setattr(_settings, "providers_yaml_path", "")
+    # Change CWD to tmp_path so ./providers.yaml is found there
+    monkeypatch.chdir(tmp_path)
+    yaml_file = tmp_path / "providers.yaml"
+    yaml_file.write_text("""\
+providers:
+  - id: "default-location"
+    display_name: "Default"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+""")
+
+    providers = get_providers()
+    assert len(providers) == 1
+    assert providers[0].id == "default-location"
+
+
+def test_get_providers_no_yaml_anywhere_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """No PROVIDERS_YAML_PATH and no ./providers.yaml → ConfigurationError."""
+    reset_providers_cache()
+    from app.config import settings as _settings
+    monkeypatch.setattr(_settings, "providers_yaml_path", "")
+    # Use a subdirectory that has no providers.yaml (autouse fixture writes to tmp_path)
+    empty_dir = tmp_path / "empty_subdir"
+    empty_dir.mkdir()
+    monkeypatch.chdir(empty_dir)
+
+    with pytest.raises(ConfigurationError, match="not found"):
+        get_providers()
 
 
 # ---------------------------------------------------------------------------
 # resolve_provider() tests
 # ---------------------------------------------------------------------------
 
-@patch("app.config.settings")
-def test_resolve_provider_none_returns_primary(mock_settings):
-    """None model_id → returns primary provider (backwards compat)."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = "mentor-sub"
-    mock_settings.litellm_display_name = "Mentor (Sub)"
-    mock_settings.litellm_alt_base_url = ""
 
+def test_resolve_provider_none_returns_primary():
+    """None model_id → returns primary provider (backwards compat)."""
     provider = resolve_provider(None)
     assert provider is not None
-    assert provider.id == "mentor-sub"
+    assert provider.id == "test-provider"  # from autouse fixture
 
 
-@patch("app.config.settings")
-def test_resolve_provider_empty_string_returns_primary(mock_settings):
+def test_resolve_provider_empty_string_returns_primary():
     """Empty string model_id → returns primary provider."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = "mentor-sub"
-    mock_settings.litellm_display_name = "Mentor (Sub)"
-    mock_settings.litellm_alt_base_url = ""
-
     provider = resolve_provider("")
     assert provider is not None
-    assert provider.id == "mentor-sub"
+    assert provider.id == "test-provider"
 
 
-@patch("app.config.settings")
-def test_resolve_provider_matches_by_id(mock_settings):
+def test_resolve_provider_matches_by_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Exact ID match → returns that provider."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = "mentor-sub"
-    mock_settings.litellm_display_name = "Mentor (Sub)"
-    mock_settings.litellm_alt_base_url = "https://api.anthropic.com"
-    mock_settings.litellm_alt_key = "sk-ant"
-    mock_settings.litellm_alt_model = "claude-sonnet-4-6"
-    mock_settings.litellm_alt_provider_id = "mentor-api"
-    mock_settings.litellm_alt_display_name = "Mentor (API)"
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "claude-sub"
+    display_name: "Mentor (Sub)"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+  - id: "mentor-api"
+    display_name: "Mentor (API)"
+    base_url: "https://api.anthropic.com"
+    api_key: "sk-ant"
+    model: "claude-sonnet-4-6"
+""")
+    reset_providers_cache()
+    from app.config import settings as _settings
+    monkeypatch.setattr(_settings, "providers_yaml_path", str(yaml_file))
 
     provider = resolve_provider("mentor-api")
     assert provider is not None
     assert provider.id == "mentor-api"
 
 
-@patch("app.config.settings")
-def test_resolve_provider_case_insensitive(mock_settings):
+def test_resolve_provider_case_insensitive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Case-insensitive matching → 'MENTOR-API' matches 'mentor-api'."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = "mentor-sub"
-    mock_settings.litellm_display_name = "Mentor (Sub)"
-    mock_settings.litellm_alt_base_url = "https://api.anthropic.com"
-    mock_settings.litellm_alt_key = "sk-ant"
-    mock_settings.litellm_alt_model = "claude-sonnet-4-6"
-    mock_settings.litellm_alt_provider_id = "mentor-api"
-    mock_settings.litellm_alt_display_name = "Mentor (API)"
+    yaml_file = _write_yaml(tmp_path, """\
+providers:
+  - id: "claude-sub"
+    display_name: "Mentor (Sub)"
+    base_url: "http://proxy:3456/v1"
+    api_key: "sk-dev"
+    model: "sonnet"
+  - id: "mentor-api"
+    display_name: "Mentor (API)"
+    base_url: "https://api.anthropic.com"
+    api_key: "sk-ant"
+    model: "claude-sonnet-4-6"
+""")
+    reset_providers_cache()
+    from app.config import settings as _settings
+    monkeypatch.setattr(_settings, "providers_yaml_path", str(yaml_file))
 
     provider = resolve_provider("MENTOR-API")
     assert provider is not None
     assert provider.id == "mentor-api"
 
 
-@patch("app.config.settings")
-def test_resolve_provider_unknown_returns_none(mock_settings):
+def test_resolve_provider_unknown_returns_none():
     """Explicit but unknown model ID → returns None."""
-    mock_settings.litellm_model = "sonnet"
-    mock_settings.litellm_base_url = "http://proxy:3456/v1"
-    mock_settings.litellm_key = "sk-dev"
-    mock_settings.litellm_provider_id = "mentor-sub"
-    mock_settings.litellm_display_name = "Mentor (Sub)"
-    mock_settings.litellm_alt_base_url = ""
-
     provider = resolve_provider("nonexistent-model")
     assert provider is None
 
@@ -288,6 +453,7 @@ def test_resolve_provider_unknown_returns_none(mock_settings):
 # ---------------------------------------------------------------------------
 # ProviderConfig is frozen
 # ---------------------------------------------------------------------------
+
 
 def test_provider_config_is_frozen():
     """ProviderConfig should be immutable (frozen dataclass)."""

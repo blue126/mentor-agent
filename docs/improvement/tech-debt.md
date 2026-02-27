@@ -107,7 +107,7 @@ Each entry tracks: origin story, severity, description, and suggested fix.
   1. **排查瓶颈**: 确认延迟发生在 proxy 层（转发图片 base64 耗时）还是 LLM API 层（处理 vision 请求耗时），通过 proxy 和 agent-service 的日志对比时间戳
   2. **超时配置**: 检查 `agent_service.py` 中 litellm `acompletion` 调用的 timeout 设置，对含图片的请求适当放宽或设置合理上限
   3. **用户反馈**: 在 SSE stream 中尽早发送 heartbeat 或处理状态提示，避免前端判定连接超时
-- **Files**: `mentor-agent-service/app/services/agent_service.py`, `claude-max-proxy/server.js`
+- **Files**: `mentor-agent-service/app/services/agent_service.py`, `unified-proxy/server.js`
 
 ## Resolved Items
 

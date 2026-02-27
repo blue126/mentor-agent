@@ -411,3 +411,128 @@ async def test_get_model_returns_404_for_unknown():
     assert resp.status_code == 404
     data = resp.json()
     assert data["error"]["type"] == "not_found_error"
+
+
+# ---------------------------------------------------------------------------
+# Story 1.7: Triple provider / YAML-based config / error handling tests
+# ---------------------------------------------------------------------------
+
+_GPT5_PROVIDER = ProviderConfig(
+    id="gpt-sub",
+    display_name="GPT-5 (ChatGPT Subscription)",
+    base_url="http://unified-proxy:3456/v1",
+    api_key="sk-unused",
+    model="openai/gpt-5.2",
+)
+
+
+async def test_list_models_returns_three_providers():
+    """AC #1: /v1/models returns three models when triple provider configured."""
+    ac, _ = _build_client()
+
+    with (
+        patch("app.dependencies.settings") as mock_dep_settings,
+        patch("app.routers.chat.get_providers", return_value=[_TEST_PROVIDER, _ALT_PROVIDER, _GPT5_PROVIDER]),
+    ):
+        mock_dep_settings.agent_api_key = _VALID_TOKEN
+        async with ac:
+            resp = await ac.get(
+                "/v1/models",
+                headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
+            )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object"] == "list"
+    assert len(data["data"]) == 3
+    ids = [m["id"] for m in data["data"]]
+    assert "test-model" in ids
+    assert "mentor-api" in ids
+    assert "gpt-sub" in ids
+
+
+async def test_chat_completions_routes_to_gpt5_provider():
+    """AC #2: chat completions routes to GPT-5 provider based on model parameter."""
+    ac, _ = _build_client()
+
+    mock_response = _make_text_response("GPT-5 response")
+
+    def _mock_resolve(model_id):
+        if model_id == "gpt-sub":
+            return _GPT5_PROVIDER
+        if not model_id or model_id == "test-model":
+            return _TEST_PROVIDER
+        return None
+
+    with (
+        patch("app.dependencies.settings") as mock_dep_settings,
+        patch("app.services.llm_service.litellm") as mock_litellm,
+        patch("app.routers.chat.resolve_provider", side_effect=_mock_resolve),
+    ):
+        mock_dep_settings.agent_api_key = _VALID_TOKEN
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+
+        async with ac:
+            resp = await ac.post(
+                "/v1/chat/completions",
+                json={"messages": [{"role": "user", "content": "Hello"}], "model": "gpt-sub", "stream": False},
+                headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
+            )
+
+    assert resp.status_code == 200
+    call_kwargs = mock_litellm.acompletion.call_args.kwargs
+    assert call_kwargs["api_base"] == "http://unified-proxy:3456/v1"
+    assert call_kwargs["model"] == "openai/gpt-5.2"
+
+
+async def test_provider_unavailable_returns_503():
+    """AC #7: Provider unreachable → 503 Service Unavailable, not 500 crash."""
+    ac, _ = _build_client()
+
+    with (
+        patch("app.dependencies.settings") as mock_dep_settings,
+        patch("app.services.llm_service.litellm") as mock_litellm,
+        _patch_resolve_provider(),
+    ):
+        mock_dep_settings.agent_api_key = _VALID_TOKEN
+        mock_litellm.acompletion = AsyncMock(
+            side_effect=Exception("Connection refused: unified-proxy:3456")
+        )
+
+        async with ac:
+            resp = await ac.post(
+                "/v1/chat/completions",
+                json={**_MESSAGES_PAYLOAD, "stream": False},
+                headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
+            )
+
+    assert resp.status_code == 503
+    data = resp.json()
+    assert data["error"]["type"] == "service_unavailable"
+    assert "test-model" in data["error"]["message"]
+
+
+async def test_chat_completions_no_model_param_uses_primary():
+    """Backwards compat: omitting model param → uses primary (first) provider."""
+    ac, _ = _build_client()
+
+    mock_response = _make_text_response("Primary response")
+
+    with (
+        patch("app.dependencies.settings") as mock_dep_settings,
+        patch("app.services.llm_service.litellm") as mock_litellm,
+        _patch_resolve_provider(),
+    ):
+        mock_dep_settings.agent_api_key = _VALID_TOKEN
+        mock_litellm.acompletion = AsyncMock(return_value=mock_response)
+
+        async with ac:
+            resp = await ac.post(
+                "/v1/chat/completions",
+                json={"messages": [{"role": "user", "content": "Hello"}], "stream": False},
+                headers={"Authorization": f"Bearer {_VALID_TOKEN}"},
+            )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["choices"][0]["message"]["content"] == "Primary response"

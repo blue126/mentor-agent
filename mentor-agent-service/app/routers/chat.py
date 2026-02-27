@@ -1,11 +1,14 @@
 """Chat completions router — OpenAI-compatible endpoint."""
 
+import logging
 import time
 
 from fastapi import APIRouter, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.config import get_providers, resolve_provider
+
+logger = logging.getLogger(__name__)
 from app.schemas.chat import (
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -83,6 +86,18 @@ async def chat_completions(request: ChatCompletionRequest) -> Response:
             max_tokens=request.max_tokens,
         )
         if isinstance(result, str):
+            # Map upstream provider errors to 503 Service Unavailable
+            if "unavailable" in result.lower() or "connection" in result.lower():
+                logger.error("Provider unavailable: %s — %s", provider.id, result)
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "error": {
+                            "message": f"Provider unavailable: {provider.id}. Please check configuration or try another provider.",
+                            "type": "service_unavailable",
+                        }
+                    },
+                )
             return JSONResponse(status_code=502, content={"error": {"message": result, "type": "proxy_error"}})
 
         if not getattr(result, "choices", None):

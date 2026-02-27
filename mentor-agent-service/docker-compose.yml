@@ -9,13 +9,16 @@ services:
       - "8100:8100"
     volumes:
       - agent-data:/app/data
+      - ./providers.yaml:/app/providers.yaml:ro
     env_file:
       - path: .env.example
         required: true
       - path: .env
         required: false
+    environment:
+      - PROVIDERS_YAML_PATH=/app/providers.yaml
     depends_on:
-      - claude-max-proxy
+      - unified-proxy
     restart: unless-stopped
 
   open-webui:
@@ -27,40 +30,32 @@ services:
       - open-webui-data:/app/backend/data
     restart: unless-stopped
 
-  # [Baseline] subscription profile 上游代理
-  # agent-service 通过 http://claude-max-proxy:3456/v1 访问
-  # 读写挂载 proxy 专属 auth 目录（proxy 自行 OAuth refresh，独立于 host CLI）
-  claude-max-proxy:
-    container_name: claude-max-proxy
-    build: ../claude-max-proxy
+  # [Unified Proxy] Multi-provider OAuth proxy (Anthropic + OpenAI)
+  # Handles Anthropic Claude (subscription) and OpenAI GPT-5 (subscription) via single endpoint.
+  # Model-based routing: gpt-*/o1*/o3*/o4* -> OpenAI, others -> Anthropic
+  # Auth file: /data/auth.json (dual-section: { anthropic: {...}, openai: {...} })
+  #
+  # First-time setup (on Mac host):
+  #   cd unified-proxy && node server.js --login all
+  # This completes both Anthropic + OpenAI OAuth authorization.
+  # Credentials are saved to ~/.unified-proxy/auth.json
+  unified-proxy:
+    container_name: unified-proxy
+    build: ../unified-proxy
     ports:
       - "3456:3456"
     volumes:
-      - ${PROXY_AUTH_DIR:?请在 .env 中设置 PROXY_AUTH_DIR（如 ~/.claude-max-proxy）}:/data:rw
+      - ${PROXY_AUTH_DIR:-~/.unified-proxy}:/data:rw
+      - ${CLAUDE_CLI_AUTH_DIR:-~/.claude}:/root/.claude:ro
     environment:
       - HOST=0.0.0.0
       - PROXY_AUTH_FILE=/data/auth.json
     restart: unless-stopped
 
-  # [Non-baseline] Claude subscription CLI wrapper — 工具调用受限，仅作可选路径
-  # 需手动启动: docker compose --profile fallback up litellm-claude-code
-  litellm-claude-code:
-    container_name: litellm-claude-code
-    image: ghcr.io/cabinlab/litellm-claude-code:latest
-    profiles: [fallback]
-    ports:
-      - "4000:4000"
-    volumes:
-      - ${CLAUDE_AUTH_PATH:?请在 .env 中设置 CLAUDE_AUTH_PATH（如 ~/.claude）}:/home/claude/.claude
-    environment:
-      - CLAUDE_TOKEN=${CLAUDE_TOKEN}
-      - LITELLM_MASTER_KEY=${LITELLM_KEY}
-    restart: unless-stopped
-
   # In Open WebUI, configure Connections -> OpenAI-compatible API:
   # Base URL: http://agent-service:8100/v1
   # API Key:  AGENT_API_KEY
-  # 基线链路: Open WebUI -> agent-service -> claude-max-proxy (subscription profile)
+  # Baseline: Open WebUI -> agent-service -> unified-proxy (Anthropic/OpenAI routing)
   # anki: (Epic 5)
 
 volumes:
