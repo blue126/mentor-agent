@@ -8,16 +8,16 @@
 #
 # Environment variable expansion:
 #   api_key supports ${ENV_VAR} syntax (e.g., "${NVIDIA_NIM_API_KEY}")
-#   Subscription providers use "sk-unused" (OAuth, no API key needed).
 #
-# Note: claude-sub and gpt-sub both point to unified-proxy.
+# Note: claude-sub and gpt-sub both point to the standalone unified-proxy on OCI VM.
 # The proxy routes requests internally based on model name.
+# unified-proxy repo: https://github.com/blue126/unified-proxy
 
 providers:
   - id: "claude-sub"
     display_name: "Claude Sonnet 4.6"
-    base_url: "http://unified-proxy:3456/v1"
-    api_key: "sk-unused"              # OAuth handled by proxy
+    base_url: "${UNIFIED_PROXY_BASE_URL}"
+    api_key: "${UNIFIED_PROXY_API_KEY}"
     model: "claude-sonnet-4-6"
 
   - id: "nvidia-nim"
@@ -31,6 +31,6 @@ providers:
 
   - id: "gpt-sub"
     display_name: "GPT-5.2"
-    base_url: "http://unified-proxy:3456/v1"
-    api_key: "sk-unused"
+    base_url: "${UNIFIED_PROXY_BASE_URL}"
+    api_key: "${UNIFIED_PROXY_API_KEY}"
     model: "gpt-5.2"

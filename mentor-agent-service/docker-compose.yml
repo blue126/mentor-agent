@@ -17,8 +17,6 @@ services:
         required: false
     environment:
       - PROVIDERS_YAML_PATH=/app/providers.yaml
-    depends_on:
-      - unified-proxy
     restart: unless-stopped
 
   open-webui:
@@ -28,28 +26,6 @@ services:
       - "3000:8080"
     volumes:
       - open-webui-data:/app/backend/data
-    restart: unless-stopped
-
-  # [Unified Proxy] Multi-provider OAuth proxy (Anthropic + OpenAI)
-  # Handles Anthropic Claude (subscription) and OpenAI GPT-5 (subscription) via single endpoint.
-  # Model-based routing: gpt-*/o1*/o3*/o4* -> OpenAI, others -> Anthropic
-  # Auth file: /data/auth.json (dual-section: { anthropic: {...}, openai: {...} })
-  #
-  # First-time setup (on Mac host):
-  #   cd unified-proxy && node server.js --login all
-  # This completes both Anthropic + OpenAI OAuth authorization.
-  # Credentials are saved to ~/.unified-proxy/auth.json
-  unified-proxy:
-    container_name: unified-proxy
-    build: ../unified-proxy
-    ports:
-      - "3456:3456"
-    volumes:
-      - ${PROXY_AUTH_DIR:-~/.unified-proxy}:/data:rw
-      - ${CLAUDE_CLI_AUTH_DIR:-~/.claude}:/root/.claude:ro
-    environment:
-      - HOST=0.0.0.0
-      - PROXY_AUTH_FILE=/data/auth.json
     restart: unless-stopped
 
   # In Open WebUI, configure Connections -> OpenAI-compatible API:
