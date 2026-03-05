@@ -19,14 +19,8 @@ build/
 data/
 *.db
 
-# OpenCode 凭证和配置
-.opencode/
-
-# Claude Code 本地设置
-.claude/
-
-# Codex
-.codex/
+# 根目录所有 dot 文件夹（本地工具配置，不纳入版本控制）
+.*/
 
 # OS
 .DS_Store
